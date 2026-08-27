@@ -24,6 +24,9 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
+        if (isPublicGetRequest(request)) {
+            return true;
+        }
 
         String token = request.getHeader(AUTHORIZATION_HEADER);
         if (token == null || token.isBlank()) {
@@ -39,6 +42,16 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         UserContext.clear();
+    }
+
+    private boolean isPublicGetRequest(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String uri = request.getRequestURI();
+        return uri.equals("/api/categories")
+                || uri.equals("/api/products")
+                || uri.matches("/api/products/\\d+");
     }
 }
 
