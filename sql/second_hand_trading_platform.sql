@@ -198,16 +198,19 @@ CREATE TABLE order_review (
     reviewee_id BIGINT UNSIGNED NOT NULL COMMENT '被评价人ID',
     rating TINYINT NOT NULL COMMENT '评分 1-5',
     content VARCHAR(500) DEFAULT NULL COMMENT '评价内容',
+    review_type TINYINT NOT NULL DEFAULT 0 COMMENT '评价类型 0首评 1追评',
+    parent_id BIGINT UNSIGNED DEFAULT NULL COMMENT '首评ID，追评使用',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '状态 0隐藏 1显示',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     is_deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除 0否 1是',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_order_review (order_id, reviewer_id, is_deleted),
+    UNIQUE KEY uk_order_review (order_id, reviewer_id, review_type, is_deleted),
     KEY idx_order_review_order_id (order_id),
     KEY idx_order_review_reviewer_id (reviewer_id),
     KEY idx_order_review_reviewee_id (reviewee_id),
-    KEY idx_order_review_status (status)
+    KEY idx_order_review_status (status),
+    KEY idx_order_review_parent_id (parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='订单评价表';
 
 CREATE TABLE report (
