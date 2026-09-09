@@ -21,10 +21,13 @@ import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -39,6 +42,8 @@ import java.util.UUID;
 @Service
 public class ProductServiceImpl implements ProductService {
 
+    private static final Logger log = LoggerFactory.getLogger(ProductServiceImpl.class);
+
     private static final int STATUS_ENABLED = 1;
     private static final int PRODUCT_ON_SALE = 2;
     private static final int PRODUCT_OFF_SALE = 3;
@@ -51,17 +56,20 @@ public class ProductServiceImpl implements ProductService {
     private final CategoryMapper categoryMapper;
     private final SysUserMapper sysUserMapper;
     private final Path uploadDir;
+    private final OssStorageService ossStorageService;
 
     public ProductServiceImpl(ProductMapper productMapper,
                               ProductImageMapper productImageMapper,
                               CategoryMapper categoryMapper,
                               SysUserMapper sysUserMapper,
+                              ObjectProvider<OssStorageService> ossStorageServiceProvider,
                               @Value("${app.upload.path:uploads}") String uploadPath) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
         this.categoryMapper = categoryMapper;
         this.sysUserMapper = sysUserMapper;
         this.uploadDir = Path.of(uploadPath).toAbsolutePath().normalize();
+        this.ossStorageService = ossStorageServiceProvider.getIfAvailable();
     }
 
     @Override
@@ -333,12 +341,16 @@ public class ProductServiceImpl implements ProductService {
         if (!List.of(".jpg", ".jpeg", ".png", ".webp").contains(suffix)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "仅支持 jpg、jpeg、png、webp 图片");
         }
+        if (ossStorageService != null) {
+            return ossStorageService.upload(file, suffix);
+        }
         try {
             Files.createDirectories(uploadDir);
             String fileName = UUID.randomUUID() + suffix;
             Files.copy(file.getInputStream(), uploadDir.resolve(fileName));
             return "/uploads/" + fileName;
         } catch (IOException exception) {
+            log.error("Save uploaded image failed. uploadDir={}", uploadDir, exception);
             throw new BizException(ErrorCode.SYSTEM_ERROR, "图片保存失败");
         }
     }

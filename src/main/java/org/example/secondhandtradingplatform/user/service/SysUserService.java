@@ -7,7 +7,7 @@ import org.example.secondhandtradingplatform.user.dto.UserProfileResponse;
 import org.example.secondhandtradingplatform.user.dto.UserRegisterRequest;
 import org.example.secondhandtradingplatform.user.dto.UserUpdateRequest;
 
-public interface SysUserService {
+public interface    SysUserService {
 
     UserProfileResponse register(UserRegisterRequest request);
 
