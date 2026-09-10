@@ -13,6 +13,8 @@ import org.example.secondhandtradingplatform.admin.dto.AdminUserUpdateRequest;
 import org.example.secondhandtradingplatform.admin.service.AdminService;
 import org.example.secondhandtradingplatform.category.entity.Category;
 import org.example.secondhandtradingplatform.category.mapper.CategoryMapper;
+import org.example.secondhandtradingplatform.category.service.CategoryService;
+import org.example.secondhandtradingplatform.common.cache.RedisCacheService;
 import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.common.exception.ErrorCode;
 import org.example.secondhandtradingplatform.order.dto.OrderResponse;
@@ -53,17 +55,20 @@ public class AdminServiceImpl implements AdminService {
     private final SysUserMapper sysUserMapper;
     private final CategoryMapper categoryMapper;
     private final TradeOrderMapper tradeOrderMapper;
+    private final RedisCacheService redisCacheService;
 
     public AdminServiceImpl(ProductMapper productMapper,
                             ProductImageMapper productImageMapper,
                             SysUserMapper sysUserMapper,
                             CategoryMapper categoryMapper,
-                            TradeOrderMapper tradeOrderMapper) {
+                            TradeOrderMapper tradeOrderMapper,
+                            RedisCacheService redisCacheService) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
         this.sysUserMapper = sysUserMapper;
         this.categoryMapper = categoryMapper;
         this.tradeOrderMapper = tradeOrderMapper;
+        this.redisCacheService = redisCacheService;
     }
 
     @Override
@@ -106,6 +111,7 @@ public class AdminServiceImpl implements AdminService {
             product.setPublishedTime(LocalDateTime.now());
         }
         productMapper.updateById(product);
+        redisCacheService.delete("product:detail:" + productId);
         return buildProductResponse(product, true);
     }
 
@@ -203,6 +209,7 @@ public class AdminServiceImpl implements AdminService {
         category.setStatus(request.getStatus() == null ? CATEGORY_ENABLED : request.getStatus());
         category.setIsDeleted(0);
         categoryMapper.insert(category);
+        evictCategoryCache();
         return AdminCategoryResponse.from(category);
     }
 
@@ -231,6 +238,7 @@ public class AdminServiceImpl implements AdminService {
             category.setStatus(request.getStatus());
         }
         categoryMapper.updateById(category);
+        evictCategoryCache();
         return AdminCategoryResponse.from(category);
     }
 
@@ -253,6 +261,11 @@ public class AdminServiceImpl implements AdminService {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "分类下存在商品，不能删除");
         }
         categoryMapper.deleteById(categoryId);
+        evictCategoryCache();
+    }
+
+    private void evictCategoryCache() {
+        redisCacheService.delete(CategoryService.ENABLED_TREE_CACHE_KEY);
     }
 
     @Override

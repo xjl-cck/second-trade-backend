@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.secondhandtradingplatform.category.entity.Category;
 import org.example.secondhandtradingplatform.category.mapper.CategoryMapper;
+import org.example.secondhandtradingplatform.common.cache.RedisCacheService;
 import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.common.exception.ErrorCode;
 import org.example.secondhandtradingplatform.product.dto.ProductCreateRequest;
@@ -34,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -50,6 +52,7 @@ public class ProductServiceImpl implements ProductService {
     private static final int PRODUCT_SOLD = 4;
     private static final int YES = 1;
     private static final int NO = 0;
+    private static final String PRODUCT_DETAIL_CACHE_PREFIX = "product:detail:";
 
     private final ProductMapper productMapper;
     private final ProductImageMapper productImageMapper;
@@ -57,12 +60,16 @@ public class ProductServiceImpl implements ProductService {
     private final SysUserMapper sysUserMapper;
     private final Path uploadDir;
     private final OssStorageService ossStorageService;
+    private final RedisCacheService redisCacheService;
+    private final Duration cacheTtl;
 
     public ProductServiceImpl(ProductMapper productMapper,
                               ProductImageMapper productImageMapper,
                               CategoryMapper categoryMapper,
                               SysUserMapper sysUserMapper,
                               ObjectProvider<OssStorageService> ossStorageServiceProvider,
+                              RedisCacheService redisCacheService,
+                              @Value("${app.cache.product-detail-ttl-seconds:300}") long cacheTtlSeconds,
                               @Value("${app.upload.path:uploads}") String uploadPath) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
@@ -70,6 +77,8 @@ public class ProductServiceImpl implements ProductService {
         this.sysUserMapper = sysUserMapper;
         this.uploadDir = Path.of(uploadPath).toAbsolutePath().normalize();
         this.ossStorageService = ossStorageServiceProvider.getIfAvailable();
+        this.redisCacheService = redisCacheService;
+        this.cacheTtl = Duration.ofSeconds(cacheTtlSeconds);
     }
 
     @Override
@@ -142,6 +151,7 @@ public class ProductServiceImpl implements ProductService {
             product.setContactPhone(trimToNull(request.getContactPhone()));
         }
         productMapper.updateById(product);
+        evictDetailCache(productId);
         return buildResponse(product, true);
     }
 
@@ -157,6 +167,7 @@ public class ProductServiceImpl implements ProductService {
             product.setPublishedTime(LocalDateTime.now());
         }
         productMapper.updateById(product);
+        evictDetailCache(productId);
     }
 
     @Override
@@ -168,18 +179,28 @@ public class ProductServiceImpl implements ProductService {
         }
         product.setStatus(PRODUCT_OFF_SALE);
         productMapper.updateById(product);
+        evictDetailCache(productId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ProductResponse getDetail(Long productId) {
+        String cacheKey = productDetailCacheKey(productId);
+        ProductResponse cached = redisCacheService.get(cacheKey, ProductResponse.class);
+        if (cached != null) {
+            productMapper.incrementBrowseCount(productId);
+            cached.setBrowseCount(defaultInt(cached.getBrowseCount(), 0) + 1);
+            return cached;
+        }
         Product product = productMapper.selectById(productId);
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
+        productMapper.incrementBrowseCount(productId);
         product.setBrowseCount(defaultInt(product.getBrowseCount(), 0) + 1);
-        productMapper.updateById(product);
-        return buildResponse(product, true);
+        ProductResponse response = buildResponse(product, true);
+        redisCacheService.set(cacheKey, response, cacheTtl);
+        return response;
     }
 
     @Override
@@ -245,6 +266,7 @@ public class ProductServiceImpl implements ProductService {
             product.setCoverImage(url);
             productMapper.updateById(product);
         }
+        evictDetailCache(productId);
         return ProductImageResponse.from(image);
     }
 
@@ -353,6 +375,14 @@ public class ProductServiceImpl implements ProductService {
             log.error("Save uploaded image failed. uploadDir={}", uploadDir, exception);
             throw new BizException(ErrorCode.SYSTEM_ERROR, "图片保存失败");
         }
+    }
+
+    private void evictDetailCache(Long productId) {
+        redisCacheService.delete(productDetailCacheKey(productId));
+    }
+
+    private String productDetailCacheKey(Long productId) {
+        return PRODUCT_DETAIL_CACHE_PREFIX + productId;
     }
 
     private int normalizePageNo(Integer pageNo) {

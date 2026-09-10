@@ -6,5 +6,7 @@ import java.util.List;
 
 public interface CategoryService {
 
+    String ENABLED_TREE_CACHE_KEY = "category:tree:enabled";
+
     List<CategoryResponse> listTree();
 }
