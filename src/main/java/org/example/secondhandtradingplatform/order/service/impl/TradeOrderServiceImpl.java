@@ -52,7 +52,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse create(OrderCreateRequest request) {
         Long buyerId = requireLoginUserId();
-        Product product = productMapper.selectById(request.getProductId());
+        Product product = productMapper.selectByIdForUpdate(request.getProductId());
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
@@ -81,7 +81,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse pay(Long orderId) {
-        TradeOrder order = getOrderForCurrentUser(orderId);
+        TradeOrder order = getOrderForCurrentUserForUpdate(orderId);
         Long userId = requireLoginUserId();
         if (!userId.equals(order.getBuyerId())) {
             throw new BizException(ErrorCode.FORBIDDEN, "只有买家可以模拟支付");
@@ -92,7 +92,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse confirm(Long orderId) {
-        TradeOrder order = getOrderForCurrentUser(orderId);
+        TradeOrder order = getOrderForCurrentUserForUpdate(orderId);
         Long userId = requireLoginUserId();
         if (!userId.equals(order.getSellerId())) {
             throw new BizException(ErrorCode.FORBIDDEN, "只有卖家可以确认成交");
@@ -164,7 +164,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (!Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, errorMessage);
         }
-        Product product = productMapper.selectById(order.getProductId());
+        Product product = productMapper.selectByIdForUpdate(order.getProductId());
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
@@ -191,6 +191,16 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private TradeOrder getOrderForCurrentUser(Long orderId) {
         Long userId = requireLoginUserId();
         TradeOrder order = tradeOrderMapper.selectById(orderId);
+        return verifyOrderOwner(order, userId);
+    }
+
+    private TradeOrder getOrderForCurrentUserForUpdate(Long orderId) {
+        Long userId = requireLoginUserId();
+        TradeOrder order = tradeOrderMapper.selectByIdForUpdate(orderId);
+        return verifyOrderOwner(order, userId);
+    }
+
+    private TradeOrder verifyOrderOwner(TradeOrder order, Long userId) {
         if (order == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "订单不存在");
         }
