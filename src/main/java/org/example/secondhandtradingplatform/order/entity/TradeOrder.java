@@ -19,6 +19,7 @@ public class TradeOrder {
     private Long buyerId;
     private Long sellerId;
     private Long productId;
+    private String idempotencyKey;
     private BigDecimal amount;
     private Integer status;
     private String closeReason;

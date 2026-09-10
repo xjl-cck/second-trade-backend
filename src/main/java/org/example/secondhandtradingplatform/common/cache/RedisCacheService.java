@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class RedisCacheService {
@@ -70,6 +71,31 @@ public class RedisCacheService {
             redisTemplate.delete(key);
         } catch (RuntimeException exception) {
             log.warn("Redis cache delete failed, key={}", key, exception);
+        }
+    }
+
+    public String tryLock(String key, Duration ttl) {
+        String token = UUID.randomUUID().toString();
+        try {
+            Boolean locked = redisTemplate.opsForValue().setIfAbsent(key, token, ttl);
+            return Boolean.TRUE.equals(locked) ? token : null;
+        } catch (RuntimeException exception) {
+            log.warn("Redis lock acquire failed, key={}", key, exception);
+            return "";
+        }
+    }
+
+    public void unlock(String key, String token) {
+        if (token == null) {
+            return;
+        }
+        try {
+            String current = redisTemplate.opsForValue().get(key);
+            if (token.equals(current)) {
+                redisTemplate.delete(key);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Redis lock release failed, key={}", key, exception);
         }
     }
 

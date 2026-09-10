@@ -8,6 +8,7 @@ import org.example.secondhandtradingplatform.chat.dto.ChatSessionCreateRequest;
 import org.example.secondhandtradingplatform.chat.dto.ChatSessionResponse;
 import org.example.secondhandtradingplatform.chat.entity.ChatMessage;
 import org.example.secondhandtradingplatform.chat.entity.ChatSession;
+import org.example.secondhandtradingplatform.chat.message.ChatMessagePublisher;
 import org.example.secondhandtradingplatform.chat.mapper.ChatMessageMapper;
 import org.example.secondhandtradingplatform.chat.mapper.ChatSessionMapper;
 import org.example.secondhandtradingplatform.chat.service.ChatService;
@@ -33,15 +34,18 @@ public class ChatServiceImpl implements ChatService {
     private final ChatMessageMapper chatMessageMapper;
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
+    private final ChatMessagePublisher chatMessagePublisher;
 
     public ChatServiceImpl(ChatSessionMapper chatSessionMapper,
                            ChatMessageMapper chatMessageMapper,
                            ProductMapper productMapper,
-                           SysUserMapper sysUserMapper) {
+                           SysUserMapper sysUserMapper,
+                           ChatMessagePublisher chatMessagePublisher) {
         this.chatSessionMapper = chatSessionMapper;
         this.chatMessageMapper = chatMessageMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
+        this.chatMessagePublisher = chatMessagePublisher;
     }
 
     @Override
@@ -155,7 +159,9 @@ public class ChatServiceImpl implements ChatService {
         session.setLastMessageTime(message.getSendTime());
         session.setUnreadCount((session.getUnreadCount() == null ? 0 : session.getUnreadCount()) + 1);
         chatSessionMapper.updateById(session);
-        return ChatMessageResponse.from(message);
+        ChatMessageResponse response = ChatMessageResponse.from(message);
+        chatMessagePublisher.publishAfterCommit(response);
+        return response;
     }
 
     @Override

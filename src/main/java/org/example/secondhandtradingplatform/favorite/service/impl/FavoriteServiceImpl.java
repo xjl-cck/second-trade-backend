@@ -9,6 +9,7 @@ import org.example.secondhandtradingplatform.favorite.dto.FavoriteListRequest;
 import org.example.secondhandtradingplatform.favorite.dto.FavoriteProductResponse;
 import org.example.secondhandtradingplatform.favorite.entity.Favorite;
 import org.example.secondhandtradingplatform.favorite.mapper.FavoriteMapper;
+import org.example.secondhandtradingplatform.favorite.message.FavoriteEventPublisher;
 import org.example.secondhandtradingplatform.favorite.service.FavoriteService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
@@ -31,13 +32,16 @@ public class FavoriteServiceImpl implements FavoriteService {
     private final FavoriteMapper favoriteMapper;
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
+    private final FavoriteEventPublisher favoriteEventPublisher;
 
     public FavoriteServiceImpl(FavoriteMapper favoriteMapper,
                                ProductMapper productMapper,
-                               SysUserMapper sysUserMapper) {
+                               SysUserMapper sysUserMapper,
+                               FavoriteEventPublisher favoriteEventPublisher) {
         this.favoriteMapper = favoriteMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
+        this.favoriteEventPublisher = favoriteEventPublisher;
     }
 
     @Override
@@ -60,7 +64,7 @@ public class FavoriteServiceImpl implements FavoriteService {
         favorite.setProductId(productId);
         favorite.setIsDeleted(0);
         favoriteMapper.insert(favorite);
-        productMapper.adjustFavoriteCount(productId, 1);
+        favoriteEventPublisher.publishAfterCommit(productId, 1);
     }
 
     @Override
@@ -74,7 +78,7 @@ public class FavoriteServiceImpl implements FavoriteService {
             return;
         }
         favoriteMapper.deleteById(favorite.getId());
-        productMapper.adjustFavoriteCount(productId, -1);
+        favoriteEventPublisher.publishAfterCommit(productId, -1);
     }
 
     @Override

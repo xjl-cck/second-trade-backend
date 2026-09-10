@@ -5,12 +5,15 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.common.exception.ErrorCode;
+import org.example.secondhandtradingplatform.common.cache.RedisCacheService;
 import org.example.secondhandtradingplatform.order.dto.OrderCancelRequest;
 import org.example.secondhandtradingplatform.order.dto.OrderCreateRequest;
 import org.example.secondhandtradingplatform.order.dto.OrderQueryRequest;
 import org.example.secondhandtradingplatform.order.dto.OrderResponse;
 import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 import org.example.secondhandtradingplatform.order.mapper.TradeOrderMapper;
+import org.example.secondhandtradingplatform.order.message.OrderEventPublisher;
+import org.example.secondhandtradingplatform.order.message.OrderStatusEvent;
 import org.example.secondhandtradingplatform.order.service.TradeOrderService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
@@ -23,6 +26,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -35,47 +39,75 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private static final int ORDER_DEALED = 1;
     private static final int ORDER_CANCELED = 2;
     private static final int ORDER_FINISHED = 3;
+    private static final Duration ORDER_LOCK_TTL = Duration.ofSeconds(10);
+    private static final String ORDER_LOCK_PREFIX = "lock:order:product:";
 
     private final TradeOrderMapper tradeOrderMapper;
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
+    private final RedisCacheService redisCacheService;
+    private final OrderEventPublisher orderEventPublisher;
 
     public TradeOrderServiceImpl(TradeOrderMapper tradeOrderMapper,
                                  ProductMapper productMapper,
-                                 SysUserMapper sysUserMapper) {
+                                 SysUserMapper sysUserMapper,
+                                 RedisCacheService redisCacheService,
+                                 OrderEventPublisher orderEventPublisher) {
         this.tradeOrderMapper = tradeOrderMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
+        this.redisCacheService = redisCacheService;
+        this.orderEventPublisher = orderEventPublisher;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse create(OrderCreateRequest request) {
         Long buyerId = requireLoginUserId();
-        Product product = productMapper.selectByIdForUpdate(request.getProductId());
-        if (product == null) {
-            throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
+        String idempotencyKey = request.getIdempotencyKey().trim();
+        TradeOrder existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
+        if (existingOrder != null) {
+            return buildResponse(existingOrder);
         }
-        if (!Integer.valueOf(PRODUCT_ON_SALE).equals(product.getStatus())) {
-            throw new BizException(ErrorCode.BUSINESS_ERROR, "只能购买上架中的商品");
+        String lockKey = ORDER_LOCK_PREFIX + request.getProductId();
+        String lockToken = redisCacheService.tryLock(lockKey, ORDER_LOCK_TTL);
+        if (lockToken == null) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "订单正在处理中，请稍后重试");
         }
-        if (buyerId.equals(product.getSellerId())) {
-            throw new BizException(ErrorCode.BUSINESS_ERROR, "不能购买自己发布的商品");
-        }
-        if (hasActiveOrder(product.getId())) {
-            throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品已有进行中的订单");
-        }
+        try {
+            Product product = productMapper.selectByIdForUpdate(request.getProductId());
+            if (product == null) {
+                throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
+            }
+            existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
+            if (existingOrder != null) {
+                return buildResponse(existingOrder);
+            }
+            if (!Integer.valueOf(PRODUCT_ON_SALE).equals(product.getStatus())) {
+                throw new BizException(ErrorCode.BUSINESS_ERROR, "只能购买上架中的商品");
+            }
+            if (buyerId.equals(product.getSellerId())) {
+                throw new BizException(ErrorCode.BUSINESS_ERROR, "不能购买自己发布的商品");
+            }
+            if (hasActiveOrder(product.getId())) {
+                throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品已有进行中的订单");
+            }
 
-        TradeOrder order = new TradeOrder();
-        order.setOrderNo(generateOrderNo());
-        order.setBuyerId(buyerId);
-        order.setSellerId(product.getSellerId());
-        order.setProductId(product.getId());
-        order.setAmount(product.getPrice());
-        order.setStatus(ORDER_WAIT_CONFIRM);
-        order.setIsDeleted(0);
-        tradeOrderMapper.insert(order);
-        return buildResponse(order);
+            TradeOrder order = new TradeOrder();
+            order.setOrderNo(generateOrderNo());
+            order.setBuyerId(buyerId);
+            order.setSellerId(product.getSellerId());
+            order.setProductId(product.getId());
+            order.setIdempotencyKey(idempotencyKey);
+            order.setAmount(product.getPrice());
+            order.setStatus(ORDER_WAIT_CONFIRM);
+            order.setIsDeleted(0);
+            tradeOrderMapper.insert(order);
+            orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已创建"));
+            return buildResponse(order);
+        } finally {
+            redisCacheService.unlock(lockKey, lockToken);
+        }
     }
 
     @Override
@@ -103,26 +135,28 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse finish(Long orderId) {
-        TradeOrder order = getOrderForCurrentUser(orderId);
+        TradeOrder order = getOrderForCurrentUserForUpdate(orderId);
         if (!Integer.valueOf(ORDER_DEALED).equals(order.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "订单状态不是已成交，不能确认完成");
         }
         order.setStatus(ORDER_FINISHED);
         order.setFinishedTime(LocalDateTime.now());
         tradeOrderMapper.updateById(order);
+        orderEventPublisher.publishAfterCommit(buildEvent(order, null, "订单已完成"));
         return buildResponse(order);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse cancel(Long orderId, OrderCancelRequest request) {
-        TradeOrder order = getOrderForCurrentUser(orderId);
+        TradeOrder order = getOrderForCurrentUserForUpdate(orderId);
         if (!Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "只有待确认订单可以取消");
         }
         order.setStatus(ORDER_CANCELED);
         order.setCloseReason(trimToNull(request == null ? null : request.getReason()));
         tradeOrderMapper.updateById(order);
+        orderEventPublisher.publishAfterCommit(buildEvent(order, null, "订单已取消"));
         return buildResponse(order);
     }
 
@@ -178,7 +212,22 @@ public class TradeOrderServiceImpl implements TradeOrderService {
 
         product.setStatus(PRODUCT_SOLD);
         productMapper.updateById(product);
+        orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已成交"));
         return buildResponse(order);
+    }
+
+    private OrderStatusEvent buildEvent(TradeOrder order, Product product, String statusText) {
+        OrderStatusEvent event = new OrderStatusEvent();
+        event.setOrderId(order.getId());
+        event.setOrderNo(order.getOrderNo());
+        event.setProductId(order.getProductId());
+        event.setProductTitle(product == null ? null : product.getTitle());
+        event.setBuyerId(order.getBuyerId());
+        event.setSellerId(order.getSellerId());
+        event.setStatus(order.getStatus());
+        event.setStatusText(statusText);
+        event.setEventTime(LocalDateTime.now());
+        return event;
     }
 
     private boolean hasActiveOrder(Long productId) {

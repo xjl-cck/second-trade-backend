@@ -1,0 +1,21 @@
+package org.example.secondhandtradingplatform.order.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+@Data
+@Component
+@ConfigurationProperties(prefix = "app.rabbitmq")
+public class OrderRabbitProperties {
+
+    private String orderExchange;
+    private String orderQueue;
+    private String orderRoutingKey;
+    private String favoriteExchange;
+    private String favoriteQueue;
+    private String favoriteRoutingKey;
+    private String chatExchange;
+    private String chatQueue;
+    private String chatRoutingKey;
+}
