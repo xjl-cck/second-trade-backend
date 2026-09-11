@@ -6,10 +6,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -71,6 +73,61 @@ public class RedisCacheService {
             redisTemplate.delete(key);
         } catch (RuntimeException exception) {
             log.warn("Redis cache delete failed, key={}", key, exception);
+        }
+    }
+
+    public long increment(String key) {
+        try {
+            Long value = redisTemplate.opsForValue().increment(key);
+            return value == null ? 0L : value;
+        } catch (RuntimeException exception) {
+            log.warn("Redis increment failed, key={}", key, exception);
+            return 0L;
+        }
+    }
+
+    public long increment(String key, long delta) {
+        try {
+            Long value = redisTemplate.opsForValue().increment(key, delta);
+            return value == null ? 0L : value;
+        } catch (RuntimeException exception) {
+            log.warn("Redis increment failed, key={}, delta={}", key, delta, exception);
+            return 0L;
+        }
+    }
+
+    public long getLong(String key) {
+        try {
+            String value = redisTemplate.opsForValue().get(key);
+            return value == null ? 0L : Long.parseLong(value);
+        } catch (RuntimeException exception) {
+            log.warn("Redis number read failed, key={}", key, exception);
+            return 0L;
+        }
+    }
+
+    public long getAndReset(String key) {
+        try {
+            String value = redisTemplate.opsForValue().getAndSet(key, "0");
+            return value == null ? 0L : Long.parseLong(value);
+        } catch (RuntimeException exception) {
+            log.warn("Redis counter reset failed, key={}", key, exception);
+            return 0L;
+        }
+    }
+
+    public Set<String> scanKeys(String pattern) {
+        try {
+            return redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Set<String>>) connection -> {
+                Set<String> keys = new java.util.HashSet<>();
+                try (var cursor = connection.scan(ScanOptions.scanOptions().match(pattern).count(100).build())) {
+                    cursor.forEachRemaining(value -> keys.add(new String(value, java.nio.charset.StandardCharsets.UTF_8)));
+                }
+                return keys;
+            });
+        } catch (RuntimeException exception) {
+            log.warn("Redis key scan failed, pattern={}", pattern, exception);
+            return Set.of();
         }
     }
 

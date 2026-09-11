@@ -39,6 +39,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 @Service
@@ -53,6 +57,7 @@ public class ProductServiceImpl implements ProductService {
     private static final int YES = 1;
     private static final int NO = 0;
     private static final String PRODUCT_DETAIL_CACHE_PREFIX = "product:detail:";
+    private static final String PRODUCT_BROWSE_COUNT_PREFIX = "product:browse:count:";
 
     private final ProductMapper productMapper;
     private final ProductImageMapper productImageMapper;
@@ -188,18 +193,20 @@ public class ProductServiceImpl implements ProductService {
         String cacheKey = productDetailCacheKey(productId);
         ProductResponse cached = redisCacheService.get(cacheKey, ProductResponse.class);
         if (cached != null) {
-            productMapper.incrementBrowseCount(productId);
-            cached.setBrowseCount(defaultInt(cached.getBrowseCount(), 0) + 1);
+            recordBrowse(productId);
+            cached.setBrowseCount(defaultInt(cached.getBrowseCount(), 0)
+                    + (int) redisCacheService.getLong(browseCountKey(productId)));
             return cached;
         }
         Product product = productMapper.selectById(productId);
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
-        productMapper.incrementBrowseCount(productId);
-        product.setBrowseCount(defaultInt(product.getBrowseCount(), 0) + 1);
         ProductResponse response = buildResponse(product, true);
         redisCacheService.set(cacheKey, response, cacheTtl);
+        recordBrowse(productId);
+        response.setBrowseCount(defaultInt(product.getBrowseCount(), 0)
+                + (int) redisCacheService.getLong(browseCountKey(productId)));
         return response;
     }
 
@@ -234,8 +241,15 @@ public class ProductServiceImpl implements ProductService {
         applySort(query, request.getSortType());
         Page<Product> productPage = productMapper.selectPage(Page.of(pageNo, pageSize), query);
         Page<ProductResponse> responsePage = Page.of(pageNo, pageSize, productPage.getTotal());
+        Map<Long, SysUser> sellers = sysUserMapper.selectBatchIds(productPage.getRecords().stream()
+                        .map(Product::getSellerId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList())
+                .stream()
+                .collect(Collectors.toMap(SysUser::getId, Function.identity()));
         List<ProductResponse> records = productPage.getRecords().stream()
-                .map(product -> buildResponse(product, false))
+                .map(product -> buildResponse(product, false, sellers.get(product.getSellerId())))
                 .toList();
         responsePage.setRecords(records);
         return responsePage;
@@ -334,8 +348,11 @@ public class ProductServiceImpl implements ProductService {
     }
 
     private ProductResponse buildResponse(Product product, boolean withImages) {
+        return buildResponse(product, withImages, sysUserMapper.selectById(product.getSellerId()));
+    }
+
+    private ProductResponse buildResponse(Product product, boolean withImages, SysUser seller) {
         ProductResponse response = ProductResponse.from(product);
-        SysUser seller = sysUserMapper.selectById(product.getSellerId());
         if (seller != null) {
             response.setSellerNickname(seller.getNickname());
             response.setSellerAvatar(seller.getAvatar());
@@ -381,8 +398,16 @@ public class ProductServiceImpl implements ProductService {
         redisCacheService.delete(productDetailCacheKey(productId));
     }
 
+    private void recordBrowse(Long productId) {
+        redisCacheService.increment(browseCountKey(productId));
+    }
+
     private String productDetailCacheKey(Long productId) {
         return PRODUCT_DETAIL_CACHE_PREFIX + productId;
+    }
+
+    private String browseCountKey(Long productId) {
+        return PRODUCT_BROWSE_COUNT_PREFIX + productId;
     }
 
     private int normalizePageNo(Integer pageNo) {
