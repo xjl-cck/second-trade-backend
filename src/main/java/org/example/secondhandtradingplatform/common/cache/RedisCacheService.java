@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.HashSet;
 
 @Service
 public class RedisCacheService {
@@ -76,6 +77,18 @@ public class RedisCacheService {
         }
     }
 
+    public void deleteByPattern(String pattern) {
+        Set<String> keys = scanKeys(pattern);
+        if (keys.isEmpty()) {
+            return;
+        }
+        try {
+            redisTemplate.delete(keys);
+        } catch (RuntimeException exception) {
+            log.warn("Redis batch delete failed, pattern={}", pattern, exception);
+        }
+    }
+
     public long increment(String key) {
         try {
             Long value = redisTemplate.opsForValue().increment(key);
@@ -119,7 +132,7 @@ public class RedisCacheService {
     public Set<String> scanKeys(String pattern) {
         try {
             return redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Set<String>>) connection -> {
-                Set<String> keys = new java.util.HashSet<>();
+                Set<String> keys = new HashSet<>();
                 try (var cursor = connection.scan(ScanOptions.scanOptions().match(pattern).count(100).build())) {
                     cursor.forEachRemaining(value -> keys.add(new String(value, java.nio.charset.StandardCharsets.UTF_8)));
                 }

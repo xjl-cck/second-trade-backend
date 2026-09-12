@@ -54,6 +54,7 @@ public class ProductBrowseCountFlushJob {
             for (BrowseCountIncrement increment : increments) {
                 redisCacheService.delete("product:detail:" + increment.getProductId());
             }
+            redisCacheService.deleteByPattern("product:hot:*");
         } catch (RuntimeException exception) {
             for (BrowseCountIncrement increment : increments) {
                 redisCacheService.increment(PRODUCT_BROWSE_COUNT_PREFIX + increment.getProductId(), increment.getDelta());

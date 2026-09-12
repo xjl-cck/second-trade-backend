@@ -20,5 +20,6 @@ public class FavoriteEventConsumer {
     public void consume(FavoriteCountEvent event) {
         productMapper.adjustFavoriteCount(event.getProductId(), event.getDelta());
         redisCacheService.delete("product:detail:" + event.getProductId());
+        redisCacheService.deleteByPattern("product:hot:*");
     }
 }

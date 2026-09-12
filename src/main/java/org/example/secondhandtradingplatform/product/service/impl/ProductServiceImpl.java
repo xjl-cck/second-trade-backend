@@ -10,6 +10,7 @@ import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.common.exception.ErrorCode;
 import org.example.secondhandtradingplatform.product.dto.ProductCreateRequest;
 import org.example.secondhandtradingplatform.product.dto.ProductImageResponse;
+import org.example.secondhandtradingplatform.product.dto.ProductPageCache;
 import org.example.secondhandtradingplatform.product.dto.ProductQueryRequest;
 import org.example.secondhandtradingplatform.product.dto.ProductResponse;
 import org.example.secondhandtradingplatform.product.dto.ProductUpdateRequest;
@@ -36,6 +37,8 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 import java.util.List;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -58,6 +61,7 @@ public class ProductServiceImpl implements ProductService {
     private static final int NO = 0;
     private static final String PRODUCT_DETAIL_CACHE_PREFIX = "product:detail:";
     private static final String PRODUCT_BROWSE_COUNT_PREFIX = "product:browse:count:";
+    private static final String PRODUCT_HOT_CACHE_PREFIX = "product:hot:";
 
     private final ProductMapper productMapper;
     private final ProductImageMapper productImageMapper;
@@ -67,6 +71,7 @@ public class ProductServiceImpl implements ProductService {
     private final OssStorageService ossStorageService;
     private final RedisCacheService redisCacheService;
     private final Duration cacheTtl;
+    private final Duration hotCacheTtl;
 
     public ProductServiceImpl(ProductMapper productMapper,
                               ProductImageMapper productImageMapper,
@@ -75,6 +80,7 @@ public class ProductServiceImpl implements ProductService {
                               ObjectProvider<OssStorageService> ossStorageServiceProvider,
                               RedisCacheService redisCacheService,
                               @Value("${app.cache.product-detail-ttl-seconds:300}") long cacheTtlSeconds,
+                              @Value("${app.cache.hot-product-ttl-seconds:60}") long hotCacheTtlSeconds,
                               @Value("${app.upload.path:uploads}") String uploadPath) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
@@ -84,6 +90,7 @@ public class ProductServiceImpl implements ProductService {
         this.ossStorageService = ossStorageServiceProvider.getIfAvailable();
         this.redisCacheService = redisCacheService;
         this.cacheTtl = Duration.ofSeconds(cacheTtlSeconds);
+        this.hotCacheTtl = Duration.ofSeconds(hotCacheTtlSeconds);
     }
 
     @Override
@@ -111,6 +118,7 @@ public class ProductServiceImpl implements ProductService {
         product.setPublishedTime(LocalDateTime.now());
         product.setIsDeleted(0);
         productMapper.insert(product);
+        evictHotCache();
         return buildResponse(product, false);
     }
 
@@ -157,6 +165,7 @@ public class ProductServiceImpl implements ProductService {
         }
         productMapper.updateById(product);
         evictDetailCache(productId);
+        evictHotCache();
         return buildResponse(product, true);
     }
 
@@ -173,6 +182,7 @@ public class ProductServiceImpl implements ProductService {
         }
         productMapper.updateById(product);
         evictDetailCache(productId);
+        evictHotCache();
     }
 
     @Override
@@ -185,6 +195,7 @@ public class ProductServiceImpl implements ProductService {
         product.setStatus(PRODUCT_OFF_SALE);
         productMapper.updateById(product);
         evictDetailCache(productId);
+        evictHotCache();
     }
 
     @Override
@@ -214,6 +225,14 @@ public class ProductServiceImpl implements ProductService {
     public Page<ProductResponse> page(ProductQueryRequest request) {
         int pageNo = normalizePageNo(request.getPageNo());
         int pageSize = normalizePageSize(request.getPageSize());
+        boolean hotSort = "hot".equalsIgnoreCase(request.getSortType());
+        String hotCacheKey = hotSort ? hotCacheKey(request, pageNo, pageSize) : null;
+        if (hotSort) {
+            ProductPageCache cached = redisCacheService.get(hotCacheKey, ProductPageCache.class);
+            if (cached != null) {
+                return cached.toPage();
+            }
+        }
         Integer status = request.getStatus();
         if (status == null && request.getSellerId() == null) {
             status = PRODUCT_ON_SALE;
@@ -252,6 +271,9 @@ public class ProductServiceImpl implements ProductService {
                 .map(product -> buildResponse(product, false, sellers.get(product.getSellerId())))
                 .toList();
         responsePage.setRecords(records);
+        if (hotSort) {
+            redisCacheService.set(hotCacheKey, ProductPageCache.from(responsePage), hotCacheTtl);
+        }
         return responsePage;
     }
 
@@ -281,6 +303,7 @@ public class ProductServiceImpl implements ProductService {
             productMapper.updateById(product);
         }
         evictDetailCache(productId);
+        evictHotCache();
         return ProductImageResponse.from(image);
     }
 
@@ -396,6 +419,37 @@ public class ProductServiceImpl implements ProductService {
 
     private void evictDetailCache(Long productId) {
         redisCacheService.delete(productDetailCacheKey(productId));
+    }
+
+    private void evictHotCache() {
+        redisCacheService.deleteByPattern(PRODUCT_HOT_CACHE_PREFIX + "*");
+    }
+
+    private String hotCacheKey(ProductQueryRequest request, int pageNo, int pageSize) {
+        return PRODUCT_HOT_CACHE_PREFIX
+                + pageNo + ":" + pageSize
+                + ":" + value(request.getCampusId())
+                + ":" + value(request.getCategoryId())
+                + ":" + value(request.getStatus())
+                + ":" + value(request.getSellerId())
+                + ":" + value(request.getMinPrice())
+                + ":" + value(request.getMaxPrice())
+                + ":" + encode(request.getKeyword());
+    }
+
+    private String value(Object value) {
+        return value == null ? "-" : value.toString();
+    }
+
+    private String encode(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "-";
+        }
+        try {
+            return URLEncoder.encode(value.trim(), StandardCharsets.UTF_8);
+        } catch (RuntimeException exception) {
+            return "-";
+        }
     }
 
     private void recordBrowse(Long productId) {
