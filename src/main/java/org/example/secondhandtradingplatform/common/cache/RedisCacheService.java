@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -19,6 +20,12 @@ import java.util.HashSet;
 public class RedisCacheService {
 
     private static final Logger log = LoggerFactory.getLogger(RedisCacheService.class);
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                    + "return redis.call('del', KEYS[1]) "
+                    + "else return 0 end",
+            Long.class
+    );
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -151,19 +158,16 @@ public class RedisCacheService {
             return Boolean.TRUE.equals(locked) ? token : null;
         } catch (RuntimeException exception) {
             log.warn("Redis lock acquire failed, key={}", key, exception);
-            return "";
+            return null;
         }
     }
 
     public void unlock(String key, String token) {
-        if (token == null) {
+        if (token == null || token.isBlank()) {
             return;
         }
         try {
-            String current = redisTemplate.opsForValue().get(key);
-            if (token.equals(current)) {
-                redisTemplate.delete(key);
-            }
+            redisTemplate.execute(UNLOCK_SCRIPT, List.of(key), token);
         } catch (RuntimeException exception) {
             log.warn("Redis lock release failed, key={}", key, exception);
         }
