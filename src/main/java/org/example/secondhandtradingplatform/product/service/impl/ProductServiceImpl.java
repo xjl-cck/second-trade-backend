@@ -105,6 +105,7 @@ public class ProductServiceImpl implements ProductService {
         product.setCategoryId(request.getCategoryId());
         product.setTitle(request.getTitle().trim());
         product.setPrice(request.getPrice());
+        product.setStock(defaultInt(request.getStock(), 1));
         product.setOriginalPrice(request.getOriginalPrice());
         product.setDescription(trimToNull(request.getDescription()));
         product.setCoverImage(trimToNull(request.getCoverImage()));
@@ -141,6 +142,9 @@ public class ProductServiceImpl implements ProductService {
         }
         if (request.getPrice() != null) {
             product.setPrice(request.getPrice());
+        }
+        if (request.getStock() != null) {
+            product.setStock(request.getStock());
         }
         if (request.getOriginalPrice() != null) {
             product.setOriginalPrice(request.getOriginalPrice());

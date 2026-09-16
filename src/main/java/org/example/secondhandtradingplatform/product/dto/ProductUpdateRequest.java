@@ -2,6 +2,7 @@ package org.example.secondhandtradingplatform.product.dto;
 
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Min;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -17,6 +18,9 @@ public class ProductUpdateRequest {
 
     @DecimalMin(value = "0.01", message = "必须大于0")
     private BigDecimal price;
+
+    @Min(value = 1, message = "库存至少为1")
+    private Integer stock;
 
     @DecimalMin(value = "0.01", message = "必须大于0")
     private BigDecimal originalPrice;

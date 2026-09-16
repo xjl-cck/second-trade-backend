@@ -29,7 +29,7 @@ public class TradeOrderController {
     }
 
     @PostMapping
-    @Operation(summary = "下单", description = "买家对上架商品下单，生成待确认订单")
+    @Operation(summary = "下单", description = "买家选择自己的收货地址后对上架商品下单，生成待确认订单")
     public Result<OrderResponse> create(@Valid @RequestBody OrderCreateRequest request) {
         return Result.success(tradeOrderService.create(request));
     }

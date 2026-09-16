@@ -18,6 +18,10 @@ public class OrderResponse {
     private Long productId;
     private String productTitle;
     private String productCoverImage;
+    private Long addressId;
+    private String receiverName;
+    private String receiverPhone;
+    private String receiverAddress;
     private BigDecimal amount;
     private Integer status;
     private String statusText;
@@ -33,6 +37,10 @@ public class OrderResponse {
         response.setBuyerId(order.getBuyerId());
         response.setSellerId(order.getSellerId());
         response.setProductId(order.getProductId());
+        response.setAddressId(order.getAddressId());
+        response.setReceiverName(order.getReceiverName());
+        response.setReceiverPhone(order.getReceiverPhone());
+        response.setReceiverAddress(order.getReceiverAddress());
         response.setAmount(order.getAmount());
         response.setStatus(order.getStatus());
         response.setStatusText(statusText(order.getStatus()));

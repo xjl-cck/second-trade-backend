@@ -20,6 +20,7 @@ public class Product {
     private Long categoryId;
     private String title;
     private BigDecimal price;
+    private Integer stock;
     private BigDecimal originalPrice;
     private String description;
     private String coverImage;

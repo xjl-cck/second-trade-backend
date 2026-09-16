@@ -3,6 +3,8 @@ package org.example.secondhandtradingplatform.order.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.secondhandtradingplatform.address.entity.ShippingAddress;
+import org.example.secondhandtradingplatform.address.service.ShippingAddressService;
 import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.common.exception.ErrorCode;
 import org.example.secondhandtradingplatform.common.cache.RedisCacheService;
@@ -47,17 +49,20 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private final SysUserMapper sysUserMapper;
     private final RedisCacheService redisCacheService;
     private final OrderEventPublisher orderEventPublisher;
+    private final ShippingAddressService shippingAddressService;
 
     public TradeOrderServiceImpl(TradeOrderMapper tradeOrderMapper,
                                  ProductMapper productMapper,
                                  SysUserMapper sysUserMapper,
                                  RedisCacheService redisCacheService,
-                                 OrderEventPublisher orderEventPublisher) {
+                                 OrderEventPublisher orderEventPublisher,
+                                 ShippingAddressService shippingAddressService) {
         this.tradeOrderMapper = tradeOrderMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
         this.redisCacheService = redisCacheService;
         this.orderEventPublisher = orderEventPublisher;
+        this.shippingAddressService = shippingAddressService;
     }
 
     @Override
@@ -89,9 +94,10 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             if (buyerId.equals(product.getSellerId())) {
                 throw new BizException(ErrorCode.BUSINESS_ERROR, "不能购买自己发布的商品");
             }
-            if (hasActiveOrder(product.getId())) {
-                throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品已有进行中的订单");
+            if (product.getStock() == null || product.getStock() < 1) {
+                throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品库存不足");
             }
+            ShippingAddress address = shippingAddressService.getForCurrentUser(request.getAddressId());
 
             TradeOrder order = new TradeOrder();
             order.setOrderNo(generateOrderNo());
@@ -99,10 +105,16 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             order.setSellerId(product.getSellerId());
             order.setProductId(product.getId());
             order.setIdempotencyKey(idempotencyKey);
+            order.setAddressId(address.getId());
+            order.setReceiverName(address.getReceiverName());
+            order.setReceiverPhone(address.getReceiverPhone());
+            order.setReceiverAddress(formatAddress(address));
             order.setAmount(product.getPrice());
             order.setStatus(ORDER_WAIT_CONFIRM);
             order.setIsDeleted(0);
             tradeOrderMapper.insert(order);
+            product.setStock(product.getStock() - 1);
+            productMapper.updateById(product);
             orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已创建"));
             return buildResponse(order);
         } finally {
@@ -156,6 +168,14 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         order.setStatus(ORDER_CANCELED);
         order.setCloseReason(trimToNull(request == null ? null : request.getReason()));
         tradeOrderMapper.updateById(order);
+        Product canceledProduct = productMapper.selectByIdForUpdate(order.getProductId());
+        if (canceledProduct != null) {
+            canceledProduct.setStock((canceledProduct.getStock() == null ? 0 : canceledProduct.getStock()) + 1);
+            if (Integer.valueOf(PRODUCT_SOLD).equals(canceledProduct.getStatus())) {
+                canceledProduct.setStatus(PRODUCT_ON_SALE);
+            }
+            productMapper.updateById(canceledProduct);
+        }
         orderEventPublisher.publishAfterCommit(buildEvent(order, null, "订单已取消"));
         return buildResponse(order);
     }
@@ -210,7 +230,9 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         order.setDealTime(LocalDateTime.now());
         tradeOrderMapper.updateById(order);
 
-        product.setStatus(PRODUCT_SOLD);
+        if (product.getStock() == null || product.getStock() <= 0) {
+            product.setStatus(PRODUCT_SOLD);
+        }
         productMapper.updateById(product);
         orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已成交"));
         return buildResponse(order);
@@ -228,13 +250,6 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         event.setStatusText(statusText);
         event.setEventTime(LocalDateTime.now());
         return event;
-    }
-
-    private boolean hasActiveOrder(Long productId) {
-        Long count = tradeOrderMapper.selectCount(Wrappers.<TradeOrder>lambdaQuery()
-                .eq(TradeOrder::getProductId, productId)
-                .in(TradeOrder::getStatus, List.of(ORDER_WAIT_CONFIRM, ORDER_DEALED)));
-        return count != null && count > 0;
     }
 
     private TradeOrder getOrderForCurrentUser(Long orderId) {
@@ -281,6 +296,10 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         String timestamp = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").format(LocalDateTime.now());
         int random = ThreadLocalRandom.current().nextInt(1000, 10000);
         return "SH" + timestamp + random;
+    }
+
+    private String formatAddress(ShippingAddress address) {
+        return address.getProvince() + address.getCity() + address.getDistrict() + address.getDetail();
     }
 
     private Long requireLoginUserId() {

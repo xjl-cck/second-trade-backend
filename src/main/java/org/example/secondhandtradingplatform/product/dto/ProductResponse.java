@@ -19,6 +19,7 @@ public class ProductResponse {
     private Long categoryId;
     private String title;
     private BigDecimal price;
+    private Integer stock;
     private BigDecimal originalPrice;
     private String description;
     private String coverImage;
@@ -41,6 +42,7 @@ public class ProductResponse {
         response.setCategoryId(product.getCategoryId());
         response.setTitle(product.getTitle());
         response.setPrice(product.getPrice());
+        response.setStock(product.getStock());
         response.setOriginalPrice(product.getOriginalPrice());
         response.setDescription(product.getDescription());
         response.setCoverImage(product.getCoverImage());

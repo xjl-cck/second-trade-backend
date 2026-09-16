@@ -1,0 +1,2 @@
+ALTER TABLE product
+    ADD COLUMN stock INT NOT NULL DEFAULT 1 COMMENT '库存数量' AFTER price;

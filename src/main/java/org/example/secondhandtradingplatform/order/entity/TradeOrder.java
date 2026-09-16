@@ -20,6 +20,10 @@ public class TradeOrder {
     private Long sellerId;
     private Long productId;
     private String idempotencyKey;
+    private Long addressId;
+    private String receiverName;
+    private String receiverPhone;
+    private String receiverAddress;
     private BigDecimal amount;
     private Integer status;
     private String closeReason;

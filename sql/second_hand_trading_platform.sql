@@ -79,6 +79,7 @@ CREATE TABLE product (
     category_id BIGINT UNSIGNED NOT NULL COMMENT '分类ID',
     title VARCHAR(128) NOT NULL COMMENT '商品标题',
     price DECIMAL(10, 2) NOT NULL COMMENT '售价',
+    stock INT NOT NULL DEFAULT 1 COMMENT '库存数量',
     original_price DECIMAL(10, 2) DEFAULT NULL COMMENT '原价',
     description TEXT COMMENT '商品描述',
     cover_image VARCHAR(255) DEFAULT NULL COMMENT '封面图',
@@ -169,12 +170,35 @@ CREATE TABLE chat_message (
     KEY idx_chat_message_send_time (send_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='聊天消息表';
 
+CREATE TABLE shipping_address (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    receiver_name VARCHAR(32) NOT NULL COMMENT '收件人',
+    receiver_phone VARCHAR(20) NOT NULL COMMENT '联系电话',
+    province VARCHAR(32) NOT NULL COMMENT '省份',
+    city VARCHAR(32) NOT NULL COMMENT '城市',
+    district VARCHAR(32) NOT NULL COMMENT '区县',
+    detail VARCHAR(128) NOT NULL COMMENT '详细地址',
+    is_default TINYINT NOT NULL DEFAULT 0 COMMENT '是否默认 0否 1是',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    is_deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除 0否 1是',
+    PRIMARY KEY (id),
+    KEY idx_shipping_address_user_id (user_id),
+    KEY idx_shipping_address_default (user_id, is_default)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='收货地址表';
+
 CREATE TABLE trade_order (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
     order_no VARCHAR(64) NOT NULL COMMENT '订单号',
     buyer_id BIGINT UNSIGNED NOT NULL COMMENT '买家ID',
     seller_id BIGINT UNSIGNED NOT NULL COMMENT '卖家ID',
     product_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
+    idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '订单创建幂等请求号',
+    address_id BIGINT UNSIGNED NOT NULL COMMENT '下单时选择的收货地址ID',
+    receiver_name VARCHAR(32) NOT NULL COMMENT '收件人快照',
+    receiver_phone VARCHAR(20) NOT NULL COMMENT '联系电话快照',
+    receiver_address VARCHAR(255) NOT NULL COMMENT '收货地址快照',
     amount DECIMAL(10, 2) NOT NULL COMMENT '成交金额',
     status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待确认 1已成交 2已取消 3已完成',
     close_reason VARCHAR(255) DEFAULT NULL COMMENT '取消/关闭原因',
