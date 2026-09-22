@@ -16,6 +16,7 @@ public class OrderResponse {
     private Long sellerId;
     private String sellerNickname;
     private Long productId;
+    private Integer quantity;
     private String productTitle;
     private String productCoverImage;
     private Long addressId;
@@ -37,6 +38,7 @@ public class OrderResponse {
         response.setBuyerId(order.getBuyerId());
         response.setSellerId(order.getSellerId());
         response.setProductId(order.getProductId());
+        response.setQuantity(order.getQuantity() == null ? 1 : order.getQuantity());
         response.setAddressId(order.getAddressId());
         response.setReceiverName(order.getReceiverName());
         response.setReceiverPhone(order.getReceiverPhone());

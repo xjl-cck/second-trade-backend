@@ -57,7 +57,8 @@ public class AsyncThreadPoolConfig {
             MessageConverter messageConverter,
             @Value("${app.rabbitmq.listener.concurrency:2}") int concurrency,
             @Value("${app.rabbitmq.listener.max-concurrency:8}") int maxConcurrency,
-            @Value("${app.rabbitmq.listener.prefetch:20}") int prefetch) {
+            @Value("${app.rabbitmq.listener.prefetch:20}") int prefetch,
+            @Value("${app.rabbitmq.listener.auto-startup:true}") boolean autoStartup) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setTaskExecutor(rabbitListenerTaskExecutor);
@@ -65,6 +66,7 @@ public class AsyncThreadPoolConfig {
         factory.setConcurrentConsumers(concurrency);
         factory.setMaxConcurrentConsumers(maxConcurrency);
         factory.setPrefetchCount(prefetch);
+        factory.setAutoStartup(autoStartup);
         return factory;
     }
 }

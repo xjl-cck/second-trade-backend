@@ -99,6 +99,9 @@ public class OrderReviewServiceImpl implements OrderReviewService {
 
     @Override
     public Page<ReviewResponse> listByProduct(Long productId, ReviewListRequest request) {
+        if (request == null) {
+            request = new ReviewListRequest();
+        }
         int pageNo = normalizePageNo(request.getPageNo());
         int pageSize = normalizePageSize(request.getPageSize());
         List<TradeOrder> orders = tradeOrderMapper.selectList(Wrappers.<TradeOrder>lambdaQuery()

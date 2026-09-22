@@ -136,6 +136,7 @@ CREATE TABLE chat_session (
     buyer_id BIGINT UNSIGNED NOT NULL COMMENT '买家ID',
     seller_id BIGINT UNSIGNED NOT NULL COMMENT '卖家ID',
     product_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
+    quantity INT NOT NULL DEFAULT 1 COMMENT '购买数量',
     idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '订单创建幂等请求号',
     last_message VARCHAR(255) DEFAULT NULL COMMENT '最后一条消息',
     last_message_time DATETIME DEFAULT NULL COMMENT '最后消息时间',

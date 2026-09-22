@@ -19,6 +19,7 @@ public class TradeOrder {
     private Long buyerId;
     private Long sellerId;
     private Long productId;
+    private Integer quantity;
     private String idempotencyKey;
     private Long addressId;
     private String receiverName;

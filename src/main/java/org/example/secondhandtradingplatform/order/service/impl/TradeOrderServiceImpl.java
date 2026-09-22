@@ -69,6 +69,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     @Transactional(rollbackFor = Exception.class)
     public OrderResponse create(OrderCreateRequest request) {
         Long buyerId = requireLoginUserId();
+        int quantity = request.getQuantity() == null ? 1 : request.getQuantity();
         String idempotencyKey = request.getIdempotencyKey().trim();
         TradeOrder existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
         if (existingOrder != null) {
@@ -94,7 +95,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             if (buyerId.equals(product.getSellerId())) {
                 throw new BizException(ErrorCode.BUSINESS_ERROR, "不能购买自己发布的商品");
             }
-            if (product.getStock() == null || product.getStock() < 1) {
+            if (product.getStock() == null || product.getStock() < quantity) {
                 throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品库存不足");
             }
             ShippingAddress address = shippingAddressService.getForCurrentUser(request.getAddressId());
@@ -104,16 +105,17 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             order.setBuyerId(buyerId);
             order.setSellerId(product.getSellerId());
             order.setProductId(product.getId());
+            order.setQuantity(quantity);
             order.setIdempotencyKey(idempotencyKey);
             order.setAddressId(address.getId());
             order.setReceiverName(address.getReceiverName());
             order.setReceiverPhone(address.getReceiverPhone());
             order.setReceiverAddress(formatAddress(address));
-            order.setAmount(product.getPrice());
+            order.setAmount(product.getPrice().multiply(java.math.BigDecimal.valueOf(quantity)));
             order.setStatus(ORDER_WAIT_CONFIRM);
             order.setIsDeleted(0);
             tradeOrderMapper.insert(order);
-            product.setStock(product.getStock() - 1);
+            product.setStock(product.getStock() - quantity);
             productMapper.updateById(product);
             orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已创建"));
             return buildResponse(order);
@@ -170,7 +172,8 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         tradeOrderMapper.updateById(order);
         Product canceledProduct = productMapper.selectByIdForUpdate(order.getProductId());
         if (canceledProduct != null) {
-            canceledProduct.setStock((canceledProduct.getStock() == null ? 0 : canceledProduct.getStock()) + 1);
+            int quantity = order.getQuantity() == null ? 1 : order.getQuantity();
+            canceledProduct.setStock((canceledProduct.getStock() == null ? 0 : canceledProduct.getStock()) + quantity);
             if (Integer.valueOf(PRODUCT_SOLD).equals(canceledProduct.getStatus())) {
                 canceledProduct.setStatus(PRODUCT_ON_SALE);
             }

@@ -7,9 +7,7 @@ import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.common.exception.ErrorCode;
 import org.example.secondhandtradingplatform.favorite.dto.FavoriteListRequest;
 import org.example.secondhandtradingplatform.favorite.dto.FavoriteProductResponse;
-import org.example.secondhandtradingplatform.favorite.entity.Favorite;
-import org.example.secondhandtradingplatform.favorite.mapper.FavoriteMapper;
-import org.example.secondhandtradingplatform.favorite.message.FavoriteEventPublisher;
+import org.example.secondhandtradingplatform.favorite.service.FavoriteRedisService;
 import org.example.secondhandtradingplatform.favorite.service.FavoriteService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
@@ -17,7 +15,6 @@ import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,23 +26,19 @@ public class FavoriteServiceImpl implements FavoriteService {
 
     private static final int PRODUCT_ON_SALE = 2;
 
-    private final FavoriteMapper favoriteMapper;
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
-    private final FavoriteEventPublisher favoriteEventPublisher;
+    private final FavoriteRedisService favoriteRedisService;
 
-    public FavoriteServiceImpl(FavoriteMapper favoriteMapper,
-                               ProductMapper productMapper,
+    public FavoriteServiceImpl(ProductMapper productMapper,
                                SysUserMapper sysUserMapper,
-                               FavoriteEventPublisher favoriteEventPublisher) {
-        this.favoriteMapper = favoriteMapper;
+                               FavoriteRedisService favoriteRedisService) {
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
-        this.favoriteEventPublisher = favoriteEventPublisher;
+        this.favoriteRedisService = favoriteRedisService;
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void favorite(Long productId) {
         Long userId = requireLoginUserId();
         Product product = getProduct(productId);
@@ -55,48 +48,30 @@ public class FavoriteServiceImpl implements FavoriteService {
         if (!Integer.valueOf(PRODUCT_ON_SALE).equals(product.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "只能收藏上架中的商品");
         }
-        if (existsFavorite(userId, productId)) {
-            return;
-        }
-
-        Favorite favorite = new Favorite();
-        favorite.setUserId(userId);
-        favorite.setProductId(productId);
-        favorite.setIsDeleted(0);
-        favoriteMapper.insert(favorite);
-        favoriteEventPublisher.publishAfterCommit(productId, 1);
+        favoriteRedisService.change(userId, productId, true);
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void unfavorite(Long productId) {
         Long userId = requireLoginUserId();
-        Favorite favorite = favoriteMapper.selectOne(Wrappers.<Favorite>lambdaQuery()
-                .eq(Favorite::getUserId, userId)
-                .eq(Favorite::getProductId, productId));
-        if (favorite == null) {
-            return;
-        }
-        favoriteMapper.deleteById(favorite.getId());
-        favoriteEventPublisher.publishAfterCommit(productId, -1);
+        favoriteRedisService.change(userId, productId, false);
     }
 
     @Override
     public Page<FavoriteProductResponse> list(FavoriteListRequest request) {
         Long userId = requireLoginUserId();
+        if (request == null) {
+            request = new FavoriteListRequest();
+        }
         int pageNo = normalizePageNo(request.getPageNo());
         int pageSize = normalizePageSize(request.getPageSize());
-
-        Page<Favorite> favoritePage = favoriteMapper.selectPage(Page.of(pageNo, pageSize), Wrappers.<Favorite>lambdaQuery()
-                .eq(Favorite::getUserId, userId)
-                .orderByDesc(Favorite::getCreateTime)
-                .orderByDesc(Favorite::getId));
-
-        List<Long> productIds = favoritePage.getRecords().stream()
-                .map(Favorite::getProductId)
+        long total = favoriteRedisService.userFavoriteCount(userId);
+        List<Long> productIds = favoriteRedisService.userProductIds(userId, (pageNo - 1) * pageSize, pageSize)
+                .stream()
+                .map(Long::valueOf)
                 .toList();
         if (productIds.isEmpty()) {
-            Page<FavoriteProductResponse> emptyPage = Page.of(pageNo, pageSize, favoritePage.getTotal());
+            Page<FavoriteProductResponse> emptyPage = Page.of(pageNo, pageSize, total);
             emptyPage.setRecords(List.of());
             return emptyPage;
         }
@@ -123,16 +98,9 @@ public class FavoriteServiceImpl implements FavoriteService {
             records.add(response);
         }
 
-        Page<FavoriteProductResponse> responsePage = Page.of(pageNo, pageSize, favoritePage.getTotal());
+        Page<FavoriteProductResponse> responsePage = Page.of(pageNo, pageSize, total);
         responsePage.setRecords(records);
         return responsePage;
-    }
-
-    private boolean existsFavorite(Long userId, Long productId) {
-        Long count = favoriteMapper.selectCount(Wrappers.<Favorite>lambdaQuery()
-                .eq(Favorite::getUserId, userId)
-                .eq(Favorite::getProductId, productId));
-        return count != null && count > 0;
     }
 
     private Product getProduct(Long productId) {

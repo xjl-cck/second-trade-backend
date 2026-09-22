@@ -35,4 +35,7 @@ public interface ProductMapper extends BaseMapper<Product> {
 
     @Update("update product set favorite_count = case when favorite_count + #{delta} < 0 then 0 else favorite_count + #{delta} end where id = #{productId}")
     int adjustFavoriteCount(@Param("productId") Long productId, @Param("delta") int delta);
+
+    @Update("update product set favorite_count = #{count} where id = #{productId} and is_deleted = 0")
+    int syncFavoriteCount(@Param("productId") Long productId, @Param("count") long count);
 }

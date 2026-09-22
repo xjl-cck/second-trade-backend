@@ -3,9 +3,6 @@ package org.example.secondhandtradingplatform.favorite.message;
 import org.example.secondhandtradingplatform.common.cache.RedisCacheService;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.stereotype.Component;
-
-@Component
 public class FavoriteEventConsumer {
 
     private final ProductMapper productMapper;
