@@ -24,6 +24,7 @@ import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -47,6 +48,7 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 @Service
 public class ProductServiceImpl implements ProductService {
@@ -72,6 +74,8 @@ public class ProductServiceImpl implements ProductService {
     private final RedisCacheService redisCacheService;
     private final Duration cacheTtl;
     private final Duration hotCacheTtl;
+    private final Duration hotCachePhysicalTtl;
+    private final Executor applicationTaskExecutor;
 
     public ProductServiceImpl(ProductMapper productMapper,
                               ProductImageMapper productImageMapper,
@@ -79,8 +83,10 @@ public class ProductServiceImpl implements ProductService {
                               SysUserMapper sysUserMapper,
                               ObjectProvider<OssStorageService> ossStorageServiceProvider,
                               RedisCacheService redisCacheService,
+                              @Qualifier("applicationTaskExecutor") Executor applicationTaskExecutor,
                               @Value("${app.cache.product-detail-ttl-seconds:300}") long cacheTtlSeconds,
                               @Value("${app.cache.hot-product-ttl-seconds:60}") long hotCacheTtlSeconds,
+                              @Value("${app.cache.hot-product-physical-ttl-seconds:86400}") long hotCachePhysicalTtlSeconds,
                               @Value("${app.upload.path:uploads}") String uploadPath) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
@@ -89,8 +95,10 @@ public class ProductServiceImpl implements ProductService {
         this.uploadDir = Path.of(uploadPath).toAbsolutePath().normalize();
         this.ossStorageService = ossStorageServiceProvider.getIfAvailable();
         this.redisCacheService = redisCacheService;
+        this.applicationTaskExecutor = applicationTaskExecutor;
         this.cacheTtl = Duration.ofSeconds(cacheTtlSeconds);
         this.hotCacheTtl = Duration.ofSeconds(hotCacheTtlSeconds);
+        this.hotCachePhysicalTtl = Duration.ofSeconds(hotCachePhysicalTtlSeconds);
     }
 
     @Override
@@ -234,9 +242,20 @@ public class ProductServiceImpl implements ProductService {
         if (hotSort) {
             ProductPageCache cached = redisCacheService.get(hotCacheKey, ProductPageCache.class);
             if (cached != null) {
+                if (cached.isLogicalExpired()) {
+                    rebuildHotCacheAsync(request, pageNo, pageSize, hotCacheKey);
+                }
                 return cached.toPage();
             }
         }
+        Page<ProductResponse> responsePage = loadPageFromDatabase(request, pageNo, pageSize);
+        if (hotSort) {
+            cacheHotPage(hotCacheKey, responsePage);
+        }
+        return responsePage;
+    }
+
+    private Page<ProductResponse> loadPageFromDatabase(ProductQueryRequest request, int pageNo, int pageSize) {
         Integer status = request.getStatus();
         if (status == null && request.getSellerId() == null) {
             status = PRODUCT_ON_SALE;
@@ -275,10 +294,37 @@ public class ProductServiceImpl implements ProductService {
                 .map(product -> buildResponse(product, false, sellers.get(product.getSellerId())))
                 .toList();
         responsePage.setRecords(records);
-        if (hotSort) {
-            redisCacheService.set(hotCacheKey, ProductPageCache.from(responsePage), hotCacheTtl);
-        }
         return responsePage;
+    }
+
+    private void cacheHotPage(String hotCacheKey, Page<ProductResponse> responsePage) {
+        ProductPageCache cache = ProductPageCache.from(
+                responsePage,
+                System.currentTimeMillis() + hotCacheTtl.toMillis()
+        );
+        redisCacheService.set(hotCacheKey, cache, hotCachePhysicalTtl);
+    }
+
+    private void rebuildHotCacheAsync(ProductQueryRequest request, int pageNo, int pageSize, String hotCacheKey) {
+        String lockKey = hotCacheKey + ":rebuild";
+        String lockToken = redisCacheService.tryLock(lockKey, Duration.ofSeconds(30));
+        if (lockToken == null) {
+            return;
+        }
+        try {
+            applicationTaskExecutor.execute(() -> {
+                try {
+                    cacheHotPage(hotCacheKey, loadPageFromDatabase(request, pageNo, pageSize));
+                } catch (RuntimeException exception) {
+                    log.warn("Async hot product cache rebuild failed, key={}", hotCacheKey, exception);
+                } finally {
+                    redisCacheService.unlock(lockKey, lockToken);
+                }
+            });
+        } catch (RuntimeException exception) {
+            redisCacheService.unlock(lockKey, lockToken);
+            log.warn("Async hot product cache rebuild submission failed, key={}", hotCacheKey, exception);
+        }
     }
 
     @Override

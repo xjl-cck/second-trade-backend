@@ -11,15 +11,21 @@ public class ProductPageCache {
     private long current;
     private long size;
     private long total;
+    private long logicalExpireAt;
     private List<ProductResponse> records;
 
-    public static ProductPageCache from(Page<ProductResponse> page) {
+    public static ProductPageCache from(Page<ProductResponse> page, long logicalExpireAt) {
         ProductPageCache cache = new ProductPageCache();
         cache.current = page.getCurrent();
         cache.size = page.getSize();
         cache.total = page.getTotal();
+        cache.logicalExpireAt = logicalExpireAt;
         cache.records = page.getRecords();
         return cache;
+    }
+
+    public boolean isLogicalExpired() {
+        return logicalExpireAt <= System.currentTimeMillis();
     }
 
     public Page<ProductResponse> toPage() {
