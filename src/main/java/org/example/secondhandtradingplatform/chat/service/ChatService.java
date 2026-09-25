@@ -7,6 +7,8 @@ import org.example.secondhandtradingplatform.chat.dto.ChatSessionCreateRequest;
 import org.example.secondhandtradingplatform.chat.dto.ChatSessionResponse;
 import org.example.secondhandtradingplatform.chat.entity.ChatMessage;
 
+import java.util.List;
+
 public interface ChatService {
 
     ChatSessionResponse createOrGetSession(ChatSessionCreateRequest request);
@@ -20,4 +22,6 @@ public interface ChatService {
     ChatMessageResponse send(Long userId, ChatMessageSendRequest request);
 
     ChatMessage getMessage(Long messageId);
+
+    List<ChatMessageResponse> listUnreadMessages(Long userId);
 }

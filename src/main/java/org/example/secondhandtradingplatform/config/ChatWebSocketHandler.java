@@ -2,7 +2,9 @@ package org.example.secondhandtradingplatform.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.secondhandtradingplatform.chat.dto.ChatMessageSendRequest;
+import org.example.secondhandtradingplatform.chat.dto.ChatMessageResponse;
 import org.example.secondhandtradingplatform.chat.service.ChatService;
+import org.example.secondhandtradingplatform.chat.service.ChatPresenceService;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -10,25 +12,32 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.util.Map;
+import java.util.List;
 
 @Component
 public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private final ObjectMapper objectMapper;
     private final ChatService chatService;
+    private final ChatPresenceService presenceService;
     private final RealtimeNotificationBroadcaster broadcaster;
 
     public ChatWebSocketHandler(ObjectMapper objectMapper,
                                 ChatService chatService,
+                                ChatPresenceService presenceService,
                                 RealtimeNotificationBroadcaster broadcaster) {
         this.objectMapper = objectMapper;
         this.chatService = chatService;
+        this.presenceService = presenceService;
         this.broadcaster = broadcaster;
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        broadcaster.register(session, getUserId(session));
+        Long userId = getUserId(session);
+        broadcaster.register(session, userId);
+        presenceService.connect(userId, session.getId());
+        sendUnreadMessages(session, userId);
     }
 
     @Override
@@ -43,7 +52,24 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        broadcaster.unregister(session, getUserId(session));
+        Long userId = getUserId(session);
+        broadcaster.unregister(session, userId);
+        presenceService.disconnect(userId, session.getId());
+    }
+
+    private void sendUnreadMessages(WebSocketSession session, Long userId) {
+        List<ChatMessageResponse> messages = chatService.listUnreadMessages(userId);
+        if (messages.isEmpty() || !session.isOpen()) {
+            return;
+        }
+        try {
+            String payload = objectMapper.writeValueAsString(
+                    Map.of("type", "message-replay", "data", messages));
+            synchronized (session) {
+                session.sendMessage(new TextMessage(payload));
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void sendError(WebSocketSession session, String message) {

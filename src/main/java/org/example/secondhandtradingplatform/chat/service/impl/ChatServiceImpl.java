@@ -24,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
+
 @Service
 public class ChatServiceImpl implements ChatService {
 
@@ -171,6 +173,18 @@ public class ChatServiceImpl implements ChatService {
             throw new BizException(ErrorCode.NOT_FOUND, "消息不存在");
         }
         return message;
+    }
+
+    @Override
+    public List<ChatMessageResponse> listUnreadMessages(Long userId) {
+        return chatMessageMapper.selectList(Wrappers.<ChatMessage>lambdaQuery()
+                        .eq(ChatMessage::getReceiverId, userId)
+                        .eq(ChatMessage::getReadStatus, UNREAD)
+                        .orderByAsc(ChatMessage::getSendTime)
+                        .orderByAsc(ChatMessage::getId))
+                .stream()
+                .map(ChatMessageResponse::from)
+                .toList();
     }
 
     private ChatSession getParticipantSession(Long sessionId, Long userId) {
