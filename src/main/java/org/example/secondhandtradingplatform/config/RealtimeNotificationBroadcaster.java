@@ -3,6 +3,7 @@ package org.example.secondhandtradingplatform.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.secondhandtradingplatform.chat.dto.ChatMessageResponse;
 import org.example.secondhandtradingplatform.order.message.OrderStatusEvent;
+import org.example.secondhandtradingplatform.system.message.SystemNotificationEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -44,6 +45,10 @@ public class RealtimeNotificationBroadcaster {
     public void sendOrder(OrderStatusEvent event) {
         send(event.getBuyerId(), "order-status", event);
         send(event.getSellerId(), "order-status", event);
+    }
+
+    public void sendSystem(SystemNotificationEvent event) {
+        send(event.getRecipientId(), "system-notification", event);
     }
 
     private void send(Long userId, String type, Object data) {

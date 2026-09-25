@@ -1,7 +1,9 @@
 package org.example.secondhandtradingplatform.config;
 
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
+import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.retry.RepublishMessageRecoverer;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,10 +57,15 @@ public class AsyncThreadPoolConfig {
             ConnectionFactory connectionFactory,
             @Qualifier("rabbitListenerTaskExecutor") Executor rabbitListenerTaskExecutor,
             MessageConverter messageConverter,
+            RepublishMessageRecoverer rabbitMessageRecoverer,
             @Value("${app.rabbitmq.listener.concurrency:2}") int concurrency,
             @Value("${app.rabbitmq.listener.max-concurrency:8}") int maxConcurrency,
             @Value("${app.rabbitmq.listener.prefetch:20}") int prefetch,
-            @Value("${app.rabbitmq.listener.auto-startup:true}") boolean autoStartup) {
+            @Value("${app.rabbitmq.listener.auto-startup:true}") boolean autoStartup,
+            @Value("${app.rabbitmq.listener.retry-max-attempts:3}") int retryMaxAttempts,
+            @Value("${app.rabbitmq.listener.retry-initial-interval-ms:1000}") long retryInitialInterval,
+            @Value("${app.rabbitmq.listener.retry-max-interval-ms:10000}") long retryMaxInterval,
+            @Value("${app.rabbitmq.listener.retry-multiplier:2}") double retryMultiplier) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setTaskExecutor(rabbitListenerTaskExecutor);
@@ -67,6 +74,11 @@ public class AsyncThreadPoolConfig {
         factory.setMaxConcurrentConsumers(maxConcurrency);
         factory.setPrefetchCount(prefetch);
         factory.setAutoStartup(autoStartup);
+        factory.setAdviceChain(RetryInterceptorBuilder.stateless()
+                .maxAttempts(retryMaxAttempts)
+                .backOffOptions(retryInitialInterval, retryMultiplier, retryMaxInterval)
+                .recoverer(rabbitMessageRecoverer)
+                .build());
         return factory;
     }
 }

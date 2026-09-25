@@ -18,4 +18,10 @@ public class OrderRabbitProperties {
     private String chatExchange;
     private String chatQueue;
     private String chatRoutingKey;
+    private String systemExchange;
+    private String systemQueue;
+    private String systemRoutingKey;
+    private String deadLetterExchange;
+    private String deadLetterQueue;
+    private String deadLetterRoutingKey;
 }
