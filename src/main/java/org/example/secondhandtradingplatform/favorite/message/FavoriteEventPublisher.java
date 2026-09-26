@@ -1,6 +1,6 @@
 package org.example.secondhandtradingplatform.favorite.message;
 
-import org.example.secondhandtradingplatform.order.config.OrderRabbitProperties;
+import org.example.secondhandtradingplatform.config.rabbitmq.RabbitMqProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -14,9 +14,9 @@ public class FavoriteEventPublisher {
     private static final Logger log = LoggerFactory.getLogger(FavoriteEventPublisher.class);
 
     private final RabbitTemplate rabbitTemplate;
-    private final OrderRabbitProperties properties;
+    private final RabbitMqProperties properties;
 
-    public FavoriteEventPublisher(RabbitTemplate rabbitTemplate, OrderRabbitProperties properties) {
+    public FavoriteEventPublisher(RabbitTemplate rabbitTemplate, RabbitMqProperties properties) {
         this.rabbitTemplate = rabbitTemplate;
         this.properties = properties;
     }

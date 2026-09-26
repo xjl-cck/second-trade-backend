@@ -1,6 +1,6 @@
 package org.example.secondhandtradingplatform.system.message;
 
-import org.example.secondhandtradingplatform.order.config.OrderRabbitProperties;
+import org.example.secondhandtradingplatform.config.rabbitmq.RabbitMqProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -14,9 +14,9 @@ public class SystemNotificationPublisher {
     private static final Logger log = LoggerFactory.getLogger(SystemNotificationPublisher.class);
 
     private final RabbitTemplate rabbitTemplate;
-    private final OrderRabbitProperties properties;
+    private final RabbitMqProperties properties;
 
-    public SystemNotificationPublisher(RabbitTemplate rabbitTemplate, OrderRabbitProperties properties) {
+    public SystemNotificationPublisher(RabbitTemplate rabbitTemplate, RabbitMqProperties properties) {
         this.rabbitTemplate = rabbitTemplate;
         this.properties = properties;
     }

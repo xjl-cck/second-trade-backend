@@ -73,7 +73,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         String idempotencyKey = request.getIdempotencyKey().trim();
         TradeOrder existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
         if (existingOrder != null) {
-            return buildResponse(existingOrder);
+            return  buildResponse(existingOrder);
         }
         String lockKey = ORDER_LOCK_PREFIX + request.getProductId();
         String lockToken = redisCacheService.tryLock(lockKey, ORDER_LOCK_TTL);

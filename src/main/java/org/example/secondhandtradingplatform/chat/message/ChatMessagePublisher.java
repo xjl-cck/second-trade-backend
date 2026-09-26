@@ -1,7 +1,7 @@
 package org.example.secondhandtradingplatform.chat.message;
 
 import org.example.secondhandtradingplatform.chat.dto.ChatMessageResponse;
-import org.example.secondhandtradingplatform.order.config.OrderRabbitProperties;
+import org.example.secondhandtradingplatform.config.rabbitmq.RabbitMqProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -15,9 +15,9 @@ public class ChatMessagePublisher {
     private static final Logger log = LoggerFactory.getLogger(ChatMessagePublisher.class);
 
     private final RabbitTemplate rabbitTemplate;
-    private final OrderRabbitProperties properties;
+    private final RabbitMqProperties properties;
 
-    public ChatMessagePublisher(RabbitTemplate rabbitTemplate, OrderRabbitProperties properties) {
+    public ChatMessagePublisher(RabbitTemplate rabbitTemplate, RabbitMqProperties properties) {
         this.rabbitTemplate = rabbitTemplate;
         this.properties = properties;
     }
