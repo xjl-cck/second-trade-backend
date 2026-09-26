@@ -3,11 +3,13 @@ package org.example.secondhandtradingplatform.favorite.service;
 import org.example.secondhandtradingplatform.common.cache.RedisCacheService;
 import org.example.secondhandtradingplatform.favorite.entity.Favorite;
 import org.example.secondhandtradingplatform.favorite.mapper.FavoriteMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -63,18 +65,22 @@ public class FavoriteRedisService {
     private final StringRedisTemplate redisTemplate;
     private final FavoriteMapper favoriteMapper;
     private final RedisCacheService redisCacheService;
+    private final Duration favoriteRedisTtl;
 
     public FavoriteRedisService(StringRedisTemplate redisTemplate,
                                 FavoriteMapper favoriteMapper,
-                                RedisCacheService redisCacheService) {
+                                RedisCacheService redisCacheService,
+                                @Value("${app.favorite.redis-ttl-seconds:1800}") long favoriteRedisTtlSeconds) {
         this.redisTemplate = redisTemplate;
         this.favoriteMapper = favoriteMapper;
         this.redisCacheService = redisCacheService;
+        this.favoriteRedisTtl = Duration.ofSeconds(favoriteRedisTtlSeconds);
     }
 
     public void ensureUserLoaded(Long userId) {
         String marker = LOADED_USER_PREFIX + userId;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(marker))) {
+            refreshUserTtl(userId);
             return;
         }
         List<Favorite> favorites = favoriteMapper.selectList(
@@ -90,12 +96,14 @@ public class FavoriteRedisService {
             redisTemplate.opsForSet().add(userSetKey(userId), productId);
             redisTemplate.opsForZSet().add(userZSetKey(userId), productId, timestamp);
         }
-        redisTemplate.opsForValue().set(marker, "1");
+        redisTemplate.opsForValue().set(marker, "1", favoriteRedisTtl);
+        refreshUserTtl(userId);
     }
 
     public void ensureProductLoaded(Long productId) {
         String marker = LOADED_PRODUCT_PREFIX + productId;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(marker))) {
+            refreshProductTtl(productId);
             return;
         }
         List<Favorite> favorites = favoriteMapper.selectList(
@@ -104,7 +112,8 @@ public class FavoriteRedisService {
         for (Favorite favorite : favorites) {
             redisTemplate.opsForSet().add(productSetKey(productId), String.valueOf(favorite.getUserId()));
         }
-        redisTemplate.opsForValue().set(marker, "1");
+        redisTemplate.opsForValue().set(marker, "1", favoriteRedisTtl);
+        refreshProductTtl(productId);
     }
 
     public boolean change(Long userId, Long productId, boolean favorite) {
@@ -120,6 +129,8 @@ public class FavoriteRedisService {
                 relation,
                 String.valueOf(System.currentTimeMillis()),
                 favorite ? "1" : "0");
+        refreshUserTtl(userId);
+        refreshProductTtl(productId);
         return Long.valueOf(1L).equals(changed);
     }
 
@@ -180,5 +191,16 @@ public class FavoriteRedisService {
 
     private String productSetKey(Long productId) {
         return PRODUCT_SET_PREFIX + productId;
+    }
+
+    private void refreshUserTtl(Long userId) {
+        redisTemplate.expire(userSetKey(userId), favoriteRedisTtl);
+        redisTemplate.expire(userZSetKey(userId), favoriteRedisTtl);
+        redisTemplate.expire(LOADED_USER_PREFIX + userId, favoriteRedisTtl);
+    }
+
+    private void refreshProductTtl(Long productId) {
+        redisTemplate.expire(productSetKey(productId), favoriteRedisTtl);
+        redisTemplate.expire(LOADED_PRODUCT_PREFIX + productId, favoriteRedisTtl);
     }
 }
