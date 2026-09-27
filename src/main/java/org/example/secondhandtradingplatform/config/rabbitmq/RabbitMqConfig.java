@@ -1,4 +1,4 @@
-package org.example.secondhandtradingplatform.order.config;
+package org.example.secondhandtradingplatform.config.rabbitmq;
 
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
@@ -17,11 +17,11 @@ import org.springframework.context.annotation.Configuration;
 import java.util.Map;
 
 @Configuration
-public class OrderRabbitConfig {
+public class RabbitMqConfig {
 
-    private final OrderRabbitProperties properties;
+    private final RabbitMqProperties properties;
 
-    public OrderRabbitConfig(OrderRabbitProperties properties) {
+    public RabbitMqConfig(RabbitMqProperties properties) {
         this.properties = properties;
     }
 

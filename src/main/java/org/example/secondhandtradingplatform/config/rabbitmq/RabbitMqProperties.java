@@ -1,4 +1,4 @@
-package org.example.secondhandtradingplatform.order.config;
+package org.example.secondhandtradingplatform.config.rabbitmq;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 @Data
 @Component
 @ConfigurationProperties(prefix = "app.rabbitmq")
-public class OrderRabbitProperties {
+public class RabbitMqProperties {
 
     private String orderExchange;
     private String orderQueue;
