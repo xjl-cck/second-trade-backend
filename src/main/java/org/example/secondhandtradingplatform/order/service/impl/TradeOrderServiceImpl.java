@@ -16,6 +16,8 @@ import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 import org.example.secondhandtradingplatform.order.mapper.TradeOrderMapper;
 import org.example.secondhandtradingplatform.order.message.OrderEventPublisher;
 import org.example.secondhandtradingplatform.order.message.OrderStatusEvent;
+import org.example.secondhandtradingplatform.order.returnrequest.dto.ReturnRequestResponse;
+import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnRequestService;
 import org.example.secondhandtradingplatform.order.service.TradeOrderService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
@@ -50,19 +52,22 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private final RedisCacheService redisCacheService;
     private final OrderEventPublisher orderEventPublisher;
     private final ShippingAddressService shippingAddressService;
+    private final ReturnRequestService returnRequestService;
 
     public TradeOrderServiceImpl(TradeOrderMapper tradeOrderMapper,
                                  ProductMapper productMapper,
                                  SysUserMapper sysUserMapper,
                                  RedisCacheService redisCacheService,
                                  OrderEventPublisher orderEventPublisher,
-                                 ShippingAddressService shippingAddressService) {
+                                 ShippingAddressService shippingAddressService,
+                                 ReturnRequestService returnRequestService) {
         this.tradeOrderMapper = tradeOrderMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
         this.redisCacheService = redisCacheService;
         this.orderEventPublisher = orderEventPublisher;
         this.shippingAddressService = shippingAddressService;
+        this.returnRequestService = returnRequestService;
     }
 
     @Override
@@ -152,6 +157,10 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         TradeOrder order = getOrderForCurrentUserForUpdate(orderId);
         if (!Integer.valueOf(ORDER_DEALED).equals(order.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "订单状态不是已成交，不能确认完成");
+        }
+        ReturnRequestResponse returnRequest = returnRequestService.findByOrderId(orderId);
+        if (returnRequest != null && (returnRequest.getStatus() == 0 || returnRequest.getStatus() == 1)) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "退货申请处理完成前不能确认订单完成");
         }
         order.setStatus(ORDER_FINISHED);
         order.setFinishedTime(LocalDateTime.now());
@@ -292,6 +301,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (seller != null) {
             response.setSellerNickname(seller.getNickname());
         }
+        response.setReturnRequest(returnRequestService.findByOrderId(order.getId()));
         return response;
     }
 

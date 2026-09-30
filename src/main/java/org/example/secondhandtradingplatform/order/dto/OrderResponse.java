@@ -2,6 +2,7 @@ package org.example.secondhandtradingplatform.order.dto;
 
 import lombok.Data;
 import org.example.secondhandtradingplatform.order.entity.TradeOrder;
+import org.example.secondhandtradingplatform.order.returnrequest.dto.ReturnRequestResponse;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -30,6 +31,7 @@ public class OrderResponse {
     private LocalDateTime dealTime;
     private LocalDateTime finishedTime;
     private LocalDateTime createTime;
+    private ReturnRequestResponse returnRequest;
 
     public static OrderResponse from(TradeOrder order) {
         OrderResponse response = new OrderResponse();
