@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS return_request (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    order_id BIGINT UNSIGNED NOT NULL COMMENT '订单ID',
+    buyer_id BIGINT UNSIGNED NOT NULL COMMENT '买家ID',
+    seller_id BIGINT UNSIGNED NOT NULL COMMENT '卖家ID',
+    reason VARCHAR(255) NOT NULL COMMENT '退货原因',
+    description VARCHAR(1000) DEFAULT NULL COMMENT '退货说明',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待审核 1退货中 2已驳回 3退款完成',
+    seller_remark VARCHAR(255) DEFAULT NULL COMMENT '卖家处理说明',
+    approved_time DATETIME DEFAULT NULL COMMENT '同意时间',
+    completed_time DATETIME DEFAULT NULL COMMENT '退款完成时间',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    is_deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除 0否 1是',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_return_request_order (order_id, is_deleted),
+    KEY idx_return_request_buyer_id (buyer_id),
+    KEY idx_return_request_seller_id (seller_id),
+    KEY idx_return_request_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='退货申请表';
