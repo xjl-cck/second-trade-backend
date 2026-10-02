@@ -12,7 +12,6 @@ public class OrderCreateRequest {
     @NotNull(message = "不能为空")
     private Long productId;
 
-    @NotNull(message = "收货地址不能为空")
     private Long addressId;
 
     @Min(value = 1, message = "购买数量至少为1")

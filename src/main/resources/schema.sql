@@ -18,3 +18,9 @@ CREATE TABLE IF NOT EXISTS return_request (
     KEY idx_return_request_seller_id (seller_id),
     KEY idx_return_request_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='退货申请表';
+
+ALTER TABLE trade_order
+    MODIFY COLUMN address_id BIGINT UNSIGNED DEFAULT NULL COMMENT '下单时选择的收货地址ID',
+    MODIFY COLUMN receiver_name VARCHAR(32) DEFAULT NULL COMMENT '收件人快照',
+    MODIFY COLUMN receiver_phone VARCHAR(20) DEFAULT NULL COMMENT '联系电话快照',
+    MODIFY COLUMN receiver_address VARCHAR(255) DEFAULT NULL COMMENT '收货地址快照';

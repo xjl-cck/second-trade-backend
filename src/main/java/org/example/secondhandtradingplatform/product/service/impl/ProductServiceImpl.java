@@ -59,6 +59,7 @@ public class ProductServiceImpl implements ProductService {
     private static final int PRODUCT_ON_SALE = 2;
     private static final int PRODUCT_OFF_SALE = 3;
     private static final int PRODUCT_SOLD = 4;
+    private static final int DELIVERY_BY_SELLER = 2;
     private static final int YES = 1;
     private static final int NO = 0;
     private static final String PRODUCT_DETAIL_CACHE_PREFIX = "product:detail:";
@@ -106,6 +107,7 @@ public class ProductServiceImpl implements ProductService {
     public ProductResponse publish(ProductCreateRequest request) {
         Long userId = requireLoginUserId();
         validateCategory(request.getCategoryId());
+        validateTradeLocation(defaultInt(request.getDeliveryMethod(), 0), request.getLocation());
 
         Product product = new Product();
         product.setSellerId(userId);
@@ -175,6 +177,7 @@ public class ProductServiceImpl implements ProductService {
         if (request.getContactPhone() != null) {
             product.setContactPhone(trimToNull(request.getContactPhone()));
         }
+        validateTradeLocation(defaultInt(product.getDeliveryMethod(), 0), product.getLocation());
         productMapper.updateById(product);
         evictDetailCache(productId);
         evictHotCache();
@@ -381,6 +384,12 @@ public class ProductServiceImpl implements ProductService {
         Category category = categoryMapper.selectById(categoryId);
         if (category == null || !Integer.valueOf(STATUS_ENABLED).equals(category.getStatus())) {
             throw new BizException(ErrorCode.PARAM_ERROR, "商品分类不存在或已禁用");
+        }
+    }
+
+    private void validateTradeLocation(Integer deliveryMethod, String location) {
+        if (!Integer.valueOf(DELIVERY_BY_SELLER).equals(deliveryMethod) && !StringUtils.hasText(location)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "线下自提和当面交易需要填写交易地点");
         }
     }
 

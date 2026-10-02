@@ -125,9 +125,6 @@ public class ChatServiceImpl implements ChatService {
                 .eq(ChatMessage::getSessionId, sessionId)
                 .eq(ChatMessage::getReceiverId, userId)
                 .eq(ChatMessage::getReadStatus, UNREAD));
-        chatSessionMapper.update(null, Wrappers.<ChatSession>lambdaUpdate()
-                .set(ChatSession::getUnreadCount, 0)
-                .eq(ChatSession::getId, sessionId));
     }
 
     @Override
@@ -200,6 +197,11 @@ public class ChatServiceImpl implements ChatService {
 
     private ChatSessionResponse buildSessionResponse(ChatSession session, Long userId) {
         ChatSessionResponse response = ChatSessionResponse.from(session);
+        Long unreadCount = chatMessageMapper.selectCount(Wrappers.<ChatMessage>lambdaQuery()
+                .eq(ChatMessage::getSessionId, session.getId())
+                .eq(ChatMessage::getReceiverId, userId)
+                .eq(ChatMessage::getReadStatus, UNREAD));
+        response.setUnreadCount(unreadCount.intValue());
         Long otherUserId = userId.equals(session.getBuyerId()) ? session.getSellerId() : session.getBuyerId();
         response.setOtherUserId(otherUserId);
         SysUser otherUser = sysUserMapper.selectById(otherUserId);

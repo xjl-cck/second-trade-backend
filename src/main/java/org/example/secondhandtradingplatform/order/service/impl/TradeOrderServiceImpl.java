@@ -43,6 +43,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private static final int ORDER_DEALED = 1;
     private static final int ORDER_CANCELED = 2;
     private static final int ORDER_FINISHED = 3;
+    private static final int DELIVERY_BY_SELLER = 2;
     private static final Duration ORDER_LOCK_TTL = Duration.ofSeconds(10);
     private static final String ORDER_LOCK_PREFIX = "lock:order:product:";
 
@@ -103,7 +104,15 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             if (product.getStock() == null || product.getStock() < quantity) {
                 throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品库存不足");
             }
-            ShippingAddress address = shippingAddressService.getForCurrentUser(request.getAddressId());
+            ShippingAddress address = null;
+            if (Integer.valueOf(DELIVERY_BY_SELLER).equals(product.getDeliveryMethod())) {
+                if (request.getAddressId() == null) {
+                    throw new BizException(ErrorCode.PARAM_ERROR, "卖家配送需要选择收货地址");
+                }
+                address = shippingAddressService.getForCurrentUser(request.getAddressId());
+            } else if (!StringUtils.hasText(product.getLocation())) {
+                throw new BizException(ErrorCode.BUSINESS_ERROR, "该商品未填写交易地点，请先联系卖家确认");
+            }
 
             TradeOrder order = new TradeOrder();
             order.setOrderNo(generateOrderNo());
@@ -112,10 +121,12 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             order.setProductId(product.getId());
             order.setQuantity(quantity);
             order.setIdempotencyKey(idempotencyKey);
-            order.setAddressId(address.getId());
-            order.setReceiverName(address.getReceiverName());
-            order.setReceiverPhone(address.getReceiverPhone());
-            order.setReceiverAddress(formatAddress(address));
+            if (address != null) {
+                order.setAddressId(address.getId());
+                order.setReceiverName(address.getReceiverName());
+                order.setReceiverPhone(address.getReceiverPhone());
+                order.setReceiverAddress(formatAddress(address));
+            }
             order.setAmount(product.getPrice().multiply(java.math.BigDecimal.valueOf(quantity)));
             order.setStatus(ORDER_WAIT_CONFIRM);
             order.setIsDeleted(0);
