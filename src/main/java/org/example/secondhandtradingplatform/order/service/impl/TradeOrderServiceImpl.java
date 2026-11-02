@@ -26,6 +26,8 @@ import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -86,6 +88,15 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (lockToken == null) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "订单正在处理中，请稍后重试");
         }
+        boolean unlockAfterTransaction = TransactionSynchronizationManager.isSynchronizationActive();
+        if (unlockAfterTransaction) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    redisCacheService.unlock(lockKey, lockToken);
+                }
+            });
+        }
         try {
             Product product = productMapper.selectByIdForUpdate(request.getProductId());
             if (product == null) {
@@ -136,7 +147,9 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已创建"));
             return buildResponse(order);
         } finally {
-            redisCacheService.unlock(lockKey, lockToken);
+            if (!unlockAfterTransaction) {
+                redisCacheService.unlock(lockKey, lockToken);
+            }
         }
     }
 
