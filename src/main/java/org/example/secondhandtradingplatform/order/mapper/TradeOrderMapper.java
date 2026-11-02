@@ -13,6 +13,10 @@ public interface TradeOrderMapper extends BaseMapper<TradeOrder> {
     TradeOrder selectByBuyerIdAndIdempotencyKey(@Param("buyerId") Long buyerId,
                                                 @Param("idempotencyKey") String idempotencyKey);
 
+    @Select("select * from trade_order where buyer_id = #{buyerId} and idempotency_key = #{idempotencyKey} and is_deleted = 0 limit 1 for update")
+    TradeOrder selectByBuyerIdAndIdempotencyKeyForUpdate(@Param("buyerId") Long buyerId,
+                                                         @Param("idempotencyKey") String idempotencyKey);
+
     @Select("select * from trade_order where id = #{orderId} and is_deleted = 0 for update")
     TradeOrder selectByIdForUpdate(@Param("orderId") Long orderId);
 }

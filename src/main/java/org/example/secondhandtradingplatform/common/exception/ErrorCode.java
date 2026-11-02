@@ -10,6 +10,7 @@ public enum ErrorCode {
     FORBIDDEN(403, "无权限访问"),
     NOT_FOUND(404, "资源不存在"),
     BUSINESS_ERROR(5000, "业务处理失败"),
+    IDEMPOTENCY_CONFLICT(409, "幂等请求冲突"),
     SYSTEM_ERROR(500, "系统异常");
 
     private final Integer code;

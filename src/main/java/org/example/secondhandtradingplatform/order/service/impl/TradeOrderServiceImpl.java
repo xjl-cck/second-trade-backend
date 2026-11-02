@@ -24,6 +24,7 @@ import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -33,7 +34,9 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -78,10 +81,11 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     public OrderResponse create(OrderCreateRequest request) {
         Long buyerId = requireLoginUserId();
         int quantity = request.getQuantity() == null ? 1 : request.getQuantity();
+        Long addressId = request.getAddressId();
         String idempotencyKey = request.getIdempotencyKey().trim();
         TradeOrder existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
         if (existingOrder != null) {
-            return  buildResponse(existingOrder);
+            return reuseExistingOrder(existingOrder, request.getProductId(), quantity, addressId);
         }
         String lockKey = ORDER_LOCK_PREFIX + request.getProductId();
         String lockToken = redisCacheService.tryLock(lockKey, ORDER_LOCK_TTL);
@@ -104,7 +108,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             }
             existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
             if (existingOrder != null) {
-                return buildResponse(existingOrder);
+                return reuseExistingOrder(existingOrder, request.getProductId(), quantity, addressId);
             }
             if (!Integer.valueOf(PRODUCT_ON_SALE).equals(product.getStatus())) {
                 throw new BizException(ErrorCode.BUSINESS_ERROR, "只能购买上架中的商品");
@@ -141,7 +145,18 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             order.setAmount(product.getPrice().multiply(java.math.BigDecimal.valueOf(quantity)));
             order.setStatus(ORDER_WAIT_CONFIRM);
             order.setIsDeleted(0);
-            tradeOrderMapper.insert(order);
+            try {
+                tradeOrderMapper.insert(order);
+            } catch (DuplicateKeyException exception) {
+                // 同一买家并发使用同一个幂等号时，由 (buyer_id, idempotency_key) 唯一约束兜底。
+                // 当前事务的普通查询可能看不到刚提交的订单，这里用加锁读获取最新已提交数据再判定。
+                TradeOrder concurrentOrder = tradeOrderMapper
+                        .selectByBuyerIdAndIdempotencyKeyForUpdate(buyerId, idempotencyKey);
+                if (concurrentOrder != null) {
+                    return reuseExistingOrder(concurrentOrder, request.getProductId(), quantity, addressId);
+                }
+                throw new BizException(ErrorCode.IDEMPOTENCY_CONFLICT, "该幂等请求号正在被并发使用，请稍后重试");
+            }
             product.setStock(product.getStock() - quantity);
             productMapper.updateById(product);
             orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已创建"));
@@ -151,6 +166,41 @@ public class TradeOrderServiceImpl implements TradeOrderService {
                 redisCacheService.unlock(lockKey, lockToken);
             }
         }
+    }
+
+    /**
+     * 复用同一个幂等请求号返回原订单之前，必须确认两次请求描述的是同一笔下单意图。
+     * 只按 buyerId + idempotencyKey 命中就直接返回原订单，会在“同一个 key 换成商品 B 再提交”时
+     * 把商品 A 的订单当成 B 的下单结果返回，因此这里比对关键业务参数，不一致就明确拒绝。
+     */
+    private OrderResponse reuseExistingOrder(TradeOrder existingOrder, Long productId, int quantity, Long addressId) {
+        String mismatch = describeRequestMismatch(existingOrder, productId, quantity, addressId);
+        if (mismatch != null) {
+            throw new BizException(ErrorCode.IDEMPOTENCY_CONFLICT,
+                    "幂等请求号已被订单 " + existingOrder.getOrderNo() + " 使用，本次请求参数与之不一致（"
+                            + mismatch + "），请更换幂等请求号后重试");
+        }
+        return buildResponse(existingOrder);
+    }
+
+    private String describeRequestMismatch(TradeOrder existingOrder, Long productId, int quantity, Long addressId) {
+        List<String> mismatches = new ArrayList<>();
+        if (!Objects.equals(existingOrder.getProductId(), productId)) {
+            mismatches.add("商品 " + existingOrder.getProductId() + " 变为 " + productId);
+        }
+        int existingQuantity = existingOrder.getQuantity() == null ? 1 : existingOrder.getQuantity();
+        if (existingQuantity != quantity) {
+            mismatches.add("数量 " + existingQuantity + " 变为 " + quantity);
+        }
+        if (!Objects.equals(existingOrder.getAddressId(), addressId)) {
+            mismatches.add("收货地址 " + describeAddressId(existingOrder.getAddressId())
+                    + " 变为 " + describeAddressId(addressId));
+        }
+        return mismatches.isEmpty() ? null : String.join("，", mismatches);
+    }
+
+    private String describeAddressId(Long addressId) {
+        return addressId == null ? "无" : String.valueOf(addressId);
     }
 
     @Override
