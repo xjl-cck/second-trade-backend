@@ -159,7 +159,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             }
             product.setStock(product.getStock() - quantity);
             productMapper.updateById(product);
-            orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已创建"));
+            orderEventPublisher.publish(buildEvent(order, product, "订单已创建"));
             return buildResponse(order);
         } finally {
             if (!unlockAfterTransaction) {
@@ -239,7 +239,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         order.setStatus(ORDER_FINISHED);
         order.setFinishedTime(LocalDateTime.now());
         tradeOrderMapper.updateById(order);
-        orderEventPublisher.publishAfterCommit(buildEvent(order, null, "订单已完成"));
+        orderEventPublisher.publish(buildEvent(order, null, "订单已完成"));
         return buildResponse(order);
     }
 
@@ -262,7 +262,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             }
             productMapper.updateById(canceledProduct);
         }
-        orderEventPublisher.publishAfterCommit(buildEvent(order, null, "订单已取消"));
+        orderEventPublisher.publish(buildEvent(order, null, "订单已取消"));
         return buildResponse(order);
     }
 
@@ -320,7 +320,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             product.setStatus(PRODUCT_SOLD);
         }
         productMapper.updateById(product);
-        orderEventPublisher.publishAfterCommit(buildEvent(order, product, "订单已成交"));
+        orderEventPublisher.publish(buildEvent(order, product, "订单已成交"));
         return buildResponse(order);
     }
 

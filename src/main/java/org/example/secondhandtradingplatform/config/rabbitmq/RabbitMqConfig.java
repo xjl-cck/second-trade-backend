@@ -124,6 +124,8 @@ public class RabbitMqConfig {
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, MessageConverter messageConverter) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
         rabbitTemplate.setMessageConverter(messageConverter);
+        // 路由不到队列时让 broker 退回消息，outbox 才能把这种“发出去但没人收”的情况判为失败并重试
+        rabbitTemplate.setMandatory(true);
         return rabbitTemplate;
     }
 

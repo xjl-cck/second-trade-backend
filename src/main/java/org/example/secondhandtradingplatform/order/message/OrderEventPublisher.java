@@ -1,52 +1,32 @@
 package org.example.secondhandtradingplatform.order.message;
 
 import org.example.secondhandtradingplatform.config.rabbitmq.RabbitMqProperties;
+import org.example.secondhandtradingplatform.outbox.OutboxService;
 import org.example.secondhandtradingplatform.system.message.SystemNotificationEvent;
 import org.example.secondhandtradingplatform.system.message.SystemNotificationPublisher;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/**
+ * 订单事件发布器：只负责把事件写进 outbox（与订单数据同事务），实际投递、确认和重试由 OutboxRelay 负责。
+ */
 @Component
 public class OrderEventPublisher {
 
-    private static final Logger log = LoggerFactory.getLogger(OrderEventPublisher.class);
-
-    private final RabbitTemplate rabbitTemplate;
+    private final OutboxService outboxService;
     private final RabbitMqProperties properties;
     private final SystemNotificationPublisher systemNotificationPublisher;
 
-    public OrderEventPublisher(RabbitTemplate rabbitTemplate,
+    public OrderEventPublisher(OutboxService outboxService,
                                RabbitMqProperties properties,
                                SystemNotificationPublisher systemNotificationPublisher) {
-        this.rabbitTemplate = rabbitTemplate;
+        this.outboxService = outboxService;
         this.properties = properties;
         this.systemNotificationPublisher = systemNotificationPublisher;
     }
 
-    public void publishAfterCommit(OrderStatusEvent event) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    publish(event);
-                }
-            });
-            return;
-        }
-        publish(event);
-    }
-
-    private void publish(OrderStatusEvent event) {
-        try {
-            rabbitTemplate.convertAndSend(properties.getOrderExchange(), properties.getOrderRoutingKey(), event);
-            publishSystemNotifications(event);
-        } catch (RuntimeException exception) {
-            log.warn("Order event publish failed, orderId={}", event.getOrderId(), exception);
-        }
+    public void publish(OrderStatusEvent event) {
+        outboxService.record(properties.getOrderExchange(), properties.getOrderRoutingKey(), event);
+        publishSystemNotifications(event);
     }
 
     private void publishSystemNotifications(OrderStatusEvent event) {
@@ -67,6 +47,6 @@ public class OrderEventPublisher {
         notification.setRelatedType("order");
         notification.setRelatedId(event.getOrderId());
         notification.setEventTime(event.getEventTime());
-        systemNotificationPublisher.publishAfterCommit(notification);
+        systemNotificationPublisher.publish(notification);
     }
 }

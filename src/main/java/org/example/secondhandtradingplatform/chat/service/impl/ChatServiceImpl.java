@@ -159,7 +159,7 @@ public class ChatServiceImpl implements ChatService {
         session.setUnreadCount((session.getUnreadCount() == null ? 0 : session.getUnreadCount()) + 1);
         chatSessionMapper.updateById(session);
         ChatMessageResponse response = ChatMessageResponse.from(message);
-        chatMessagePublisher.publishAfterCommit(response);
+        chatMessagePublisher.publish(response);
         return response;
     }
 

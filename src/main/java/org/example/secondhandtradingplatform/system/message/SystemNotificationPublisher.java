@@ -1,48 +1,24 @@
 package org.example.secondhandtradingplatform.system.message;
 
 import org.example.secondhandtradingplatform.config.rabbitmq.RabbitMqProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.example.secondhandtradingplatform.outbox.OutboxService;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/**
+ * 系统通知发布器：事件先落 outbox，由 OutboxRelay 负责投递。
+ */
 @Component
 public class SystemNotificationPublisher {
 
-    private static final Logger log = LoggerFactory.getLogger(SystemNotificationPublisher.class);
-
-    private final RabbitTemplate rabbitTemplate;
+    private final OutboxService outboxService;
     private final RabbitMqProperties properties;
 
-    public SystemNotificationPublisher(RabbitTemplate rabbitTemplate, RabbitMqProperties properties) {
-        this.rabbitTemplate = rabbitTemplate;
+    public SystemNotificationPublisher(OutboxService outboxService, RabbitMqProperties properties) {
+        this.outboxService = outboxService;
         this.properties = properties;
     }
 
-    public void publishAfterCommit(SystemNotificationEvent event) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    publish(event);
-                }
-            });
-            return;
-        }
-        publish(event);
-    }
-
-    private void publish(SystemNotificationEvent event) {
-        try {
-            rabbitTemplate.convertAndSend(
-                    properties.getSystemExchange(),
-                    properties.getSystemRoutingKey(),
-                    event
-            );
-        } catch (RuntimeException exception) {
-            log.warn("System notification publish failed, recipientId={}", event.getRecipientId(), exception);
-        }
+    public void publish(SystemNotificationEvent event) {
+        outboxService.record(properties.getSystemExchange(), properties.getSystemRoutingKey(), event);
     }
 }
