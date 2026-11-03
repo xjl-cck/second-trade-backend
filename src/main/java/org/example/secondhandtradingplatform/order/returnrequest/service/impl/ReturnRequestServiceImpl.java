@@ -11,12 +11,15 @@ import org.example.secondhandtradingplatform.order.returnrequest.dto.ReturnReque
 import org.example.secondhandtradingplatform.order.returnrequest.entity.ReturnRequest;
 import org.example.secondhandtradingplatform.order.returnrequest.mapper.ReturnRequestMapper;
 import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnRequestService;
+import org.example.secondhandtradingplatform.payment.dto.PaymentRefundResponse;
+import org.example.secondhandtradingplatform.payment.service.AlipayRefundService;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 @Service
 public class ReturnRequestServiceImpl implements ReturnRequestService {
@@ -30,11 +33,14 @@ public class ReturnRequestServiceImpl implements ReturnRequestService {
 
     private final ReturnRequestMapper returnRequestMapper;
     private final TradeOrderMapper tradeOrderMapper;
+    private final AlipayRefundService alipayRefundService;
 
     public ReturnRequestServiceImpl(ReturnRequestMapper returnRequestMapper,
-                                    TradeOrderMapper tradeOrderMapper) {
+                                    TradeOrderMapper tradeOrderMapper,
+                                    AlipayRefundService alipayRefundService) {
         this.returnRequestMapper = returnRequestMapper;
         this.tradeOrderMapper = tradeOrderMapper;
+        this.alipayRefundService = alipayRefundService;
     }
 
     @Override
@@ -102,6 +108,12 @@ public class ReturnRequestServiceImpl implements ReturnRequestService {
         ReturnRequest returnRequest = getReturnRequestForUpdate(returnRequestId);
         requireSeller(returnRequest);
         requireStatus(returnRequest, RETURN_APPROVED, "只有退货中的申请可以确认退款");
+        TradeOrder order = getOrderForUpdate(returnRequest.getOrderId());
+        // 先真的把钱退回去，成功了再改状态；失败就抛异常回滚，退货单停留在“退货中”，可以重试
+        Optional<PaymentRefundResponse> refund = alipayRefundService.refund(returnRequest, order);
+        if (refund.isPresent() && !Integer.valueOf(1).equals(refund.get().getStatus())) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "支付宝退款失败：" + refund.get().getError());
+        }
         returnRequest.setStatus(RETURN_COMPLETED);
         String remark = trimToNull(request == null ? null : request.getRemark());
         if (remark != null) {

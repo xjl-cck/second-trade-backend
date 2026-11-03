@@ -10,6 +10,7 @@ import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 import org.example.secondhandtradingplatform.order.mapper.TradeOrderMapper;
 import org.example.secondhandtradingplatform.order.message.OrderEventPublisher;
 import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnRequestService;
+import org.example.secondhandtradingplatform.payment.service.AlipayTradeCloseService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
 import org.example.secondhandtradingplatform.security.UserContext;
@@ -59,6 +60,7 @@ class TradeOrderServiceImplTest {
         shippingAddressService = mock(ShippingAddressService.class);
         returnRequestService = mock(ReturnRequestService.class);
         OrderEventPublisher orderEventPublisher = mock(OrderEventPublisher.class);
+        AlipayTradeCloseService alipayTradeCloseService = mock(AlipayTradeCloseService.class);
         tradeOrderService = new TradeOrderServiceImpl(
                 tradeOrderMapper,
                 productMapper,
@@ -66,7 +68,8 @@ class TradeOrderServiceImplTest {
                 redisCacheService,
                 orderEventPublisher,
                 shippingAddressService,
-                returnRequestService
+                returnRequestService,
+                alipayTradeCloseService
         );
         UserContext.setUserId(BUYER_ID);
     }

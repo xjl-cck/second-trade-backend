@@ -8,6 +8,7 @@ import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -40,6 +41,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public Result<Void> handleConstraintViolationException(ConstraintViolationException exception) {
         return Result.fail(ErrorCode.PARAM_ERROR.getCode(), exception.getMessage());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Result<Void> handleNoResourceFoundException(NoResourceFoundException exception) {
+        // 浏览器自动请求 /favicon.ico 之类会走到这里，属正常 404，不打 ERROR 堆栈
+        log.debug("静态资源不存在：{}", exception.getResourcePath());
+        return Result.fail(ErrorCode.NOT_FOUND.getCode(), ErrorCode.NOT_FOUND.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

@@ -1,18 +1,52 @@
 spring:
   application:
     name: second-handTradingPlatform
+  task:
+    scheduling:
+      # outbox 投递会等 broker 确认，和浏览量/收藏定时任务共用单线程调度器会互相拖慢
+      pool:
+        size: ${SCHEDULER_POOL_SIZE:4}
+  sql:
+    init:
+      mode: always
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: ${DB_URL:jdbc:mysql://localhost:3306/trading?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:215032121cck}
+    password: ${DB_PASSWORD}
+    hikari:
+      pool-name: ${DB_POOL_NAME:secondHandHikariPool}
+      maximum-pool-size: ${DB_MAX_POOL_SIZE:20}
+      minimum-idle: ${DB_MIN_IDLE:5}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:30000}
+      validation-timeout: ${DB_VALIDATION_TIMEOUT_MS:5000}
+      idle-timeout: ${DB_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:1800000}
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 20MB
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      database: ${REDIS_DATABASE:2}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD}
+    # outbox 投递需要 broker 的 publisher confirm 和路由失败回退，否则发出去就当作成功
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        default-requeue-rejected: false
 
 server:
-  port: 8081
+  # 用内网穿透时如果隧道的「本地端口」不可改（固定 80），启动时加 SERVER_PORT=80 即可
+  port: ${SERVER_PORT:8081}
 
 mybatis-plus:
   configuration:
@@ -25,15 +59,116 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  secret: ${JWT_SECRET:second-hand-trading-platform-development-secret-key-please-change}
+  secret: ${JWT_SECRET}
   expiration-minutes: ${JWT_EXPIRATION_MINUTES:10080}
+
+alipay:
+  # 本地没有沙箱密钥时保持 false，原有 /api/orders/{id}/pay 模拟支付照常可用
+  enabled: ${ALIPAY_ENABLED:false}
+  # 沙箱网关；上正式环境改成 https://openapi.alipay.com/gateway.do
+  gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi-sandbox.dl.alipaydev.com/gateway.do}
+  app-id: ${ALIPAY_APP_ID:}
+  # 应用私钥：直接填 PKCS8 内容，或改用 private-key-path 指向密钥文件
+  private-key: ${ALIPAY_APP_PRIVATE_KEY:}
+  private-key-path: ${ALIPAY_APP_PRIVATE_KEY_PATH:}
+  alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+  sign-type: RSA2
+  charset: utf-8
+  format: json
+  # 异步通知必须是公网可达地址，本地开发请用内网穿透工具映射 8081 后替换
+  notify-url: ${ALIPAY_NOTIFY_URL:http://localhost:8081/api/payments/alipay/notify}
+  return-url: ${ALIPAY_RETURN_URL:http://localhost:8081/api/payments/alipay/return}
+  # 配了前端结果页就 302 过去，留空则由后端返回一个简易结果页
+  return-page: ${ALIPAY_RETURN_PAGE:}
+  subject-prefix: ${ALIPAY_SUBJECT_PREFIX:二手交易平台-}
+  timeout-express: ${ALIPAY_TIMEOUT_EXPRESS:30m}
 
 app:
   upload:
     path: ${UPLOAD_PATH:uploads}
+  outbox:
+    relay-interval-ms: ${OUTBOX_RELAY_INTERVAL_MS:2000}
+    initial-delay-ms: ${OUTBOX_INITIAL_DELAY_MS:5000}
+    batch-size: ${OUTBOX_BATCH_SIZE:50}
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:30}
+    initial-backoff-seconds: ${OUTBOX_INITIAL_BACKOFF_SECONDS:2}
+    max-backoff-seconds: ${OUTBOX_MAX_BACKOFF_SECONDS:300}
+    confirm-timeout-ms: ${OUTBOX_CONFIRM_TIMEOUT_MS:5000}
+    stuck-timeout-seconds: ${OUTBOX_STUCK_TIMEOUT_SECONDS:120}
+  oss:
+    enabled: ${OSS_ENABLED:true}
+    endpoint: ${OSS_ENDPOINT:}
+    bucket: ${OSS_BUCKET:}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    public-domain: ${OSS_PUBLIC_DOMAIN:}
+  cache:
+    product-detail-ttl-seconds: ${PRODUCT_DETAIL_CACHE_TTL_SECONDS:300}
+    category-ttl-seconds: ${CATEGORY_CACHE_TTL_SECONDS:3600}
+    hot-product-ttl-seconds: ${HOT_PRODUCT_CACHE_TTL_SECONDS:60}
+    hot-product-physical-ttl-seconds: ${HOT_PRODUCT_PHYSICAL_TTL_SECONDS:86400}
+  browse-count:
+    flush-interval-ms: ${BROWSE_COUNT_FLUSH_INTERVAL_MS:60000}
+    initial-delay-ms: ${BROWSE_COUNT_INITIAL_DELAY_MS:10000}
+  favorite:
+    flush-interval-ms: ${FAVORITE_FLUSH_INTERVAL_MS:30000}
+    initial-delay-ms: ${FAVORITE_FLUSH_INITIAL_DELAY_MS:10000}
+    redis-ttl-seconds: ${FAVORITE_REDIS_TTL_SECONDS:1800}
+  order:
+    # 超过这么久还没支付的订单由定时任务自动关闭：关支付宝交易 + 回滚库存
+    timeout-minutes: ${ORDER_PAY_TIMEOUT_MINUTES:30}
+    auto-close-enabled: ${ORDER_AUTO_CLOSE_ENABLED:true}
+    auto-close-interval-ms: ${ORDER_AUTO_CLOSE_INTERVAL_MS:60000}
+    auto-close-initial-delay-ms: ${ORDER_AUTO_CLOSE_INITIAL_DELAY_MS:30000}
+    auto-close-batch-size: ${ORDER_AUTO_CLOSE_BATCH_SIZE:50}
+  payment:
+    # 退款对账：扫描「待退款/退款失败」的流水，回查支付宝补正
+    refund-reconcile-enabled: ${REFUND_RECONCILE_ENABLED:true}
+    refund-reconcile-interval-ms: ${REFUND_RECONCILE_INTERVAL_MS:300000}
+    refund-reconcile-initial-delay-ms: ${REFUND_RECONCILE_INITIAL_DELAY_MS:60000}
+    refund-reconcile-batch-size: ${REFUND_RECONCILE_BATCH_SIZE:50}
+  async:
+    core-pool-size: ${ASYNC_CORE_POOL_SIZE:4}
+    max-pool-size: ${ASYNC_MAX_POOL_SIZE:8}
+    queue-capacity: ${ASYNC_QUEUE_CAPACITY:200}
+  rabbitmq:
+    order-exchange: ${RABBITMQ_ORDER_EXCHANGE:order.events}
+    order-queue: ${RABBITMQ_ORDER_QUEUE:order.notifications}
+    order-routing-key: ${RABBITMQ_ORDER_ROUTING_KEY:order.status}
+    favorite-exchange: ${RABBITMQ_FAVORITE_EXCHANGE:favorite.events}
+    favorite-queue: ${RABBITMQ_FAVORITE_QUEUE:favorite.counts}
+    favorite-routing-key: ${RABBITMQ_FAVORITE_ROUTING_KEY:favorite.count}
+    chat-exchange: ${RABBITMQ_CHAT_EXCHANGE:chat.events}
+    chat-queue: ${RABBITMQ_CHAT_QUEUE:chat.notifications}
+    chat-routing-key: ${RABBITMQ_CHAT_ROUTING_KEY:chat.message}
+    system-exchange: ${RABBITMQ_SYSTEM_EXCHANGE:system.events}
+    system-queue: ${RABBITMQ_SYSTEM_QUEUE:system.notifications}
+    system-routing-key: ${RABBITMQ_SYSTEM_ROUTING_KEY:system.notification}
+    dead-letter-exchange: ${RABBITMQ_DEAD_LETTER_EXCHANGE:platform.dead-letter}
+    dead-letter-queue: ${RABBITMQ_DEAD_LETTER_QUEUE:platform.dead-letter.queue}
+    dead-letter-routing-key: ${RABBITMQ_DEAD_LETTER_ROUTING_KEY:platform.dead-letter}
+    listener:
+      auto-startup: ${RABBITMQ_LISTENER_AUTO_STARTUP:true}
+      core-pool-size: ${RABBIT_LISTENER_CORE_POOL_SIZE:6}
+      max-pool-size: ${RABBIT_LISTENER_MAX_POOL_SIZE:24}
+      queue-capacity: ${RABBIT_LISTENER_QUEUE_CAPACITY:0}
+      concurrency: ${RABBIT_LISTENER_CONCURRENCY:2}
+      max-concurrency: ${RABBIT_LISTENER_MAX_CONCURRENCY:8}
+      prefetch: ${RABBIT_LISTENER_PREFETCH:20}
+      retry-max-attempts: ${RABBIT_LISTENER_RETRY_MAX_ATTEMPTS:3}
+      retry-initial-interval-ms: ${RABBIT_LISTENER_RETRY_INITIAL_INTERVAL_MS:1000}
+      retry-max-interval-ms: ${RABBIT_LISTENER_RETRY_MAX_INTERVAL_MS:10000}
+      retry-multiplier: ${RABBIT_LISTENER_RETRY_MULTIPLIER:2}
 
 springdoc:
   api-docs:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+logging:
+  level:
+    # 支付宝 SDK 把自己的业务错误（如 ACQ.TRADE_NOT_EXIST）打成 ERROR，轮询时会刷屏；
+    # 业务侧失败已经在 AlipayPaymentServiceImpl 里自己记录，这里关掉即可
+    sdk.biz.err: 'off'
+    org.example.secondhandtradingplatform.payment: info
