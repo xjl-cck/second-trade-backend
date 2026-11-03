@@ -286,6 +286,10 @@ public class ProductServiceImpl implements ProductService {
         applySort(query, request.getSortType());
         Page<Product> productPage = productMapper.selectPage(Page.of(pageNo, pageSize), query);
         Page<ProductResponse> responsePage = Page.of(pageNo, pageSize, productPage.getTotal());
+        if (productPage.getRecords().isEmpty()) {
+            responsePage.setRecords(List.of());
+            return responsePage;
+        }
         Map<Long, SysUser> sellers = sysUserMapper.selectBatchIds(productPage.getRecords().stream()
                         .map(Product::getSellerId)
                         .filter(Objects::nonNull)

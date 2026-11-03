@@ -31,6 +31,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
@@ -210,6 +211,26 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         Long userId = requireLoginUserId();
         if (!userId.equals(order.getBuyerId())) {
             throw new BizException(ErrorCode.FORBIDDEN, "只有买家可以模拟支付");
+        }
+        return deal(order, "订单状态不是待确认，不能支付");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OrderResponse paySuccess(String orderNo, BigDecimal paidAmount) {
+        TradeOrder order = tradeOrderMapper.selectByOrderNoForUpdate(orderNo);
+        if (order == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "订单不存在");
+        }
+        if (Integer.valueOf(ORDER_DEALED).equals(order.getStatus())
+                || Integer.valueOf(ORDER_FINISHED).equals(order.getStatus())) {
+            return buildResponse(order);
+        }
+        if (Integer.valueOf(ORDER_CANCELED).equals(order.getStatus())) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "订单已取消，支付款项需要退款");
+        }
+        if (paidAmount == null || order.getAmount() == null || paidAmount.compareTo(order.getAmount()) != 0) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "支付金额与订单金额不一致");
         }
         return deal(order, "订单状态不是待确认，不能支付");
     }

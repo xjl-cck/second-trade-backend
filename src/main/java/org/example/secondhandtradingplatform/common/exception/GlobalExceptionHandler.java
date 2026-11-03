@@ -2,6 +2,8 @@ package org.example.secondhandtradingplatform.common.exception;
 
 import jakarta.validation.ConstraintViolationException;
 import org.example.secondhandtradingplatform.common.Result;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -11,6 +13,8 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BizException.class)
     public Result<Void> handleBizException(BizException exception) {
@@ -40,6 +44,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception exception) {
+        log.error("Unhandled request exception", exception);
         return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), ErrorCode.SYSTEM_ERROR.getMessage());
     }
 }

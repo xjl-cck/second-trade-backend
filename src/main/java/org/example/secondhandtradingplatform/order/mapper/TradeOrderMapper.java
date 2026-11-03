@@ -19,4 +19,10 @@ public interface TradeOrderMapper extends BaseMapper<TradeOrder> {
 
     @Select("select * from trade_order where id = #{orderId} and is_deleted = 0 for update")
     TradeOrder selectByIdForUpdate(@Param("orderId") Long orderId);
+
+    @Select("select * from trade_order where order_no = #{orderNo} and is_deleted = 0 limit 1")
+    TradeOrder selectByOrderNo(@Param("orderNo") String orderNo);
+
+    @Select("select * from trade_order where order_no = #{orderNo} and is_deleted = 0 limit 1 for update")
+    TradeOrder selectByOrderNoForUpdate(@Param("orderNo") String orderNo);
 }

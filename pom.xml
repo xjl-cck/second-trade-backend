@@ -22,6 +22,7 @@
         <mybatis-plus.version>3.5.9</mybatis-plus.version>
         <jjwt.version>0.12.6</jjwt.version>
         <aliyun-oss.version>3.18.4</aliyun-oss.version>
+        <alipay-sdk.version>4.40.1061.ALL</alipay-sdk.version>
     </properties>
 
     <dependencies>
@@ -53,6 +54,11 @@
             <groupId>com.aliyun.oss</groupId>
             <artifactId>aliyun-sdk-oss</artifactId>
             <version>${aliyun-oss.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.sdk</groupId>
+            <artifactId>alipay-sdk-java</artifactId>
+            <version>${alipay-sdk.version}</version>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>
