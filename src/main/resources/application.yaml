@@ -95,6 +95,15 @@ app:
       # 回看窗口要大于一次重试/长事务可能的延迟，太小会漏，太大会重复写
       window-seconds: ${SEARCH_SYNC_WINDOW_SECONDS:600}
       batch-size: ${SEARCH_SYNC_BATCH_SIZE:500}
+    canal:
+      # canal-server 没起来时保持 false，否则启动后会一直重连告警
+      enabled: ${CANAL_ENABLED:true}
+      host: ${CANAL_HOST:127.0.0.1}
+      port: ${CANAL_PORT:11111}
+      # canal-server 里的 instance 名，对应 docker/canal/conf/<destination>
+      destination: ${CANAL_DESTINATION:example}
+      filter: '${CANAL_FILTER:trading\.product}'
+      batch-size: ${CANAL_BATCH_SIZE:100}
   upload:
     path: ${UPLOAD_PATH:uploads}
   outbox:

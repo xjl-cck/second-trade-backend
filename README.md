@@ -5,6 +5,17 @@
 
 - [项目架构与订单并发流程](docs/interview-diagrams.md)
 - [支付宝接入说明（沙箱 / 电脑网站支付）](docs/alipay-integration.md)
+- [商品索引同步：Canal 监听 binlog + 定时对账](docs/canal-search-sync.md)
+
+## 本地依赖
+
+除 MySQL / Redis / RabbitMQ 外，商品搜索的实时索引依赖 canal-server，用 Docker 启动：
+
+```powershell
+docker compose -f docker/canal/docker-compose.yml up -d
+```
+
+不启动它也能跑（搜索会退回 MySQL，索引由定时任务兜底），把 `CANAL_ENABLED` 设为 `false` 即可关掉重连。
 
 ## 环境变量
 

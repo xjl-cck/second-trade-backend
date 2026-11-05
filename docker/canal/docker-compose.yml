@@ -1,0 +1,16 @@
+services:
+  canal-server:
+    image: canal/canal-server:v1.1.8
+    container_name: canal-server
+    restart: unless-stopped
+    ports:
+      # Spring 侧用 TCP 客户端订阅，只需要这个端口
+      - "11111:11111"
+    environment:
+      TZ: Asia/Shanghai
+    extra_hosts:
+      # Windows 上 host.docker.internal 不一定能解析，显式映射到宿主机网关
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 挂整个实例目录：instance.properties 是我们改过的，meta.dat / h2 也落在这里，重启不丢位点
+      - ./conf/example:/home/admin/canal-server/conf/example

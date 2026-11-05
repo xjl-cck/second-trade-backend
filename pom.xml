@@ -102,6 +102,28 @@
             <version>2.6.0</version>
         </dependency>
         <dependency>
+            <groupId>com.alibaba.otter</groupId>
+            <artifactId>canal.client</artifactId>
+            <version>1.1.8</version>
+            <exclusions>
+                <!-- canal 客户端带的是老版本 zookeeper/zkclient，单机 TCP 模式用不到，排除掉避免和 Spring Boot 的依赖打架 -->
+                <exclusion>
+                    <groupId>org.apache.zookeeper</groupId>
+                    <artifactId>zookeeper</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.101tec</groupId>
+                    <artifactId>zkclient</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <!-- canal.client 把 protocol 声明成了 optional，必须显式引一次，否则 Entry/RowChange 编译期不可见 -->
+            <groupId>com.alibaba.otter</groupId>
+            <artifactId>canal.protocol</artifactId>
+            <version>1.1.8</version>
+        </dependency>
+        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
