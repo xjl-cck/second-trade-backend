@@ -6,8 +6,10 @@ import org.example.secondhandtradingplatform.common.Result;
 import org.example.secondhandtradingplatform.common.exception.BizException;
 import org.example.secondhandtradingplatform.payment.config.AlipayProperties;
 import org.example.secondhandtradingplatform.payment.dto.PaymentCreateResponse;
+import org.example.secondhandtradingplatform.payment.dto.PaymentRefundResponse;
 import org.example.secondhandtradingplatform.payment.dto.PaymentStatusResponse;
 import org.example.secondhandtradingplatform.payment.service.AlipayPaymentService;
+import org.example.secondhandtradingplatform.payment.service.AlipayRefundService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -34,11 +36,14 @@ public class AlipayPaymentController {
     private static final Logger log = LoggerFactory.getLogger(AlipayPaymentController.class);
 
     private final AlipayPaymentService alipayPaymentService;
+    private final AlipayRefundService alipayRefundService;
     private final AlipayProperties alipayProperties;
 
     public AlipayPaymentController(AlipayPaymentService alipayPaymentService,
+                                   AlipayRefundService alipayRefundService,
                                    AlipayProperties alipayProperties) {
         this.alipayPaymentService = alipayPaymentService;
+        this.alipayRefundService = alipayRefundService;
         this.alipayProperties = alipayProperties;
     }
 
@@ -100,6 +105,13 @@ public class AlipayPaymentController {
             description = "前端轮询用：会主动向支付宝查询一次，若已支付则同步推进本地订单状态")
     public Result<PaymentStatusResponse> status(@PathVariable String orderNo) {
         return Result.success(alipayPaymentService.queryAndSync(orderNo));
+    }
+
+    @GetMapping("/refund/{returnRequestId}")
+    @Operation(summary = "查询退款结果",
+            description = "退货单确认退款后，前端可用它轮询；会主动向支付宝查询退款单并同步本地记录")
+    public Result<PaymentRefundResponse> refundStatus(@PathVariable Long returnRequestId) {
+        return Result.success(alipayRefundService.queryAndSync(returnRequestId));
     }
 
     private String renderResultPage(String outTradeNo, PaymentStatusResponse status, String error) {
