@@ -39,6 +39,4 @@ public class UserUpdateRequest {
     @Size(max = 32, message = "长度不能超过32")
     private String grade;
 
-    @Schema(description = "校园ID", example = "1")
-    private Long campusId;
 }

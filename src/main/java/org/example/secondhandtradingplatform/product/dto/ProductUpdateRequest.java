@@ -10,7 +10,6 @@ import java.math.BigDecimal;
 @Data
 public class ProductUpdateRequest {
 
-    private Long campusId;
     private Long categoryId;
 
     @Size(max = 128, message = "不能超过128个字符")

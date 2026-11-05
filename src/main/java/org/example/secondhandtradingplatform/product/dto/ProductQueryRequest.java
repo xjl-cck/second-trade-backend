@@ -8,7 +8,6 @@ import java.math.BigDecimal;
 @Data
 public class ProductQueryRequest {
 
-    private Long campusId;
     private Long categoryId;
     private String keyword;
     private BigDecimal minPrice;

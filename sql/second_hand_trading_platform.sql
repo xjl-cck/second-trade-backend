@@ -42,7 +42,6 @@ CREATE TABLE sys_user (
     gender TINYINT DEFAULT 0 COMMENT '性别 0未知 1男 2女',
     major VARCHAR(64) DEFAULT NULL COMMENT '专业',
     grade VARCHAR(32) DEFAULT NULL COMMENT '年级',
-    campus_id BIGINT UNSIGNED DEFAULT NULL COMMENT '校园ID',
     role TINYINT NOT NULL DEFAULT 0 COMMENT '角色 0学生 1管理员',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '状态 0禁用 1正常 2封禁',
     last_login_time DATETIME DEFAULT NULL COMMENT '最后登录时间',
@@ -53,7 +52,6 @@ CREATE TABLE sys_user (
     UNIQUE KEY uk_user_username (username),
     UNIQUE KEY uk_user_phone (phone),
     UNIQUE KEY uk_user_student_no (student_no),
-    KEY idx_user_campus_id (campus_id),
     KEY idx_user_status (status),
     KEY idx_user_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户表';
@@ -77,7 +75,6 @@ CREATE TABLE category (
 CREATE TABLE product (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
     seller_id BIGINT UNSIGNED NOT NULL COMMENT '发布人ID',
-    campus_id BIGINT UNSIGNED NOT NULL COMMENT '校园ID',
     category_id BIGINT UNSIGNED NOT NULL COMMENT '分类ID',
     title VARCHAR(128) NOT NULL COMMENT '商品标题',
     price DECIMAL(10, 2) NOT NULL COMMENT '售价',
@@ -99,7 +96,6 @@ CREATE TABLE product (
     is_deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除 0否 1是',
     PRIMARY KEY (id),
     KEY idx_product_seller_id (seller_id),
-    KEY idx_product_campus_id (campus_id),
     KEY idx_product_category_id (category_id),
     KEY idx_product_status (status),
     KEY idx_product_created_time (create_time),

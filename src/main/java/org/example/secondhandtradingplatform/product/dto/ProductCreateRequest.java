@@ -13,9 +13,6 @@ import java.math.BigDecimal;
 public class ProductCreateRequest {
 
     @NotNull(message = "不能为空")
-    private Long campusId;
-
-    @NotNull(message = "不能为空")
     private Long categoryId;
 
     @NotBlank(message = "不能为空")

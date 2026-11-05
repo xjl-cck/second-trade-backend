@@ -49,7 +49,6 @@ public class SysUserServiceImpl implements SysUserService {
         user.setNickname(request.getNickname().trim());
         user.setPhone(trimToNull(request.getPhone()));
         user.setStudentNo(trimToNull(request.getStudentNo()));
-        user.setCampusId(request.getCampusId());
         user.setGender(0);
         user.setRole(ROLE_STUDENT);
         user.setStatus(STATUS_NORMAL);
@@ -110,10 +109,6 @@ public class SysUserServiceImpl implements SysUserService {
         if (request.getGrade() != null) {
             user.setGrade(trimToNull(request.getGrade()));
         }
-        if (request.getCampusId() != null) {
-            user.setCampusId(request.getCampusId());
-        }
-
         sysUserMapper.updateById(user);
         return UserProfileResponse.from(user);
     }

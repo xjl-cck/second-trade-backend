@@ -32,6 +32,4 @@ public class UserRegisterRequest {
     @Size(max = 32, message = "长度不能超过32")
     private String studentNo;
 
-    @Schema(description = "校园ID", example = "1")
-    private Long campusId;
 }

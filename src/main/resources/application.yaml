@@ -32,6 +32,8 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD}
       database: ${REDIS_DATABASE:2}
+    elasticsearch:
+      uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -82,6 +84,17 @@ alipay:
   timeout-express: ${ALIPAY_TIMEOUT_EXPRESS:30m}
 
 app:
+  search:
+    elasticsearch:
+      index: ${ELASTICSEARCH_PRODUCT_INDEX:products}
+    sync:
+      # 业务侧写完库已经会立即写一次 ES，这里只是定时按 update_time 窗口兜底重放
+      enabled: ${SEARCH_SYNC_ENABLED:true}
+      interval-ms: ${SEARCH_SYNC_INTERVAL_MS:60000}
+      initial-delay-ms: ${SEARCH_SYNC_INITIAL_DELAY_MS:45000}
+      # 回看窗口要大于一次重试/长事务可能的延迟，太小会漏，太大会重复写
+      window-seconds: ${SEARCH_SYNC_WINDOW_SECONDS:600}
+      batch-size: ${SEARCH_SYNC_BATCH_SIZE:500}
   upload:
     path: ${UPLOAD_PATH:uploads}
   outbox:

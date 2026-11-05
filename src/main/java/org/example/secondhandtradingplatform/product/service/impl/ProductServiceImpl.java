@@ -77,6 +77,7 @@ public class ProductServiceImpl implements ProductService {
     private final Duration hotCacheTtl;
     private final Duration hotCachePhysicalTtl;
     private final Executor applicationTaskExecutor;
+    private final ProductSearchIndex productSearchIndex;
 
     public ProductServiceImpl(ProductMapper productMapper,
                               ProductImageMapper productImageMapper,
@@ -84,6 +85,7 @@ public class ProductServiceImpl implements ProductService {
                               SysUserMapper sysUserMapper,
                               ObjectProvider<OssStorageService> ossStorageServiceProvider,
                               RedisCacheService redisCacheService,
+                              ProductSearchIndex productSearchIndex,
                               @Qualifier("applicationTaskExecutor") Executor applicationTaskExecutor,
                               @Value("${app.cache.product-detail-ttl-seconds:300}") long cacheTtlSeconds,
                               @Value("${app.cache.hot-product-ttl-seconds:60}") long hotCacheTtlSeconds,
@@ -96,6 +98,7 @@ public class ProductServiceImpl implements ProductService {
         this.uploadDir = Path.of(uploadPath).toAbsolutePath().normalize();
         this.ossStorageService = ossStorageServiceProvider.getIfAvailable();
         this.redisCacheService = redisCacheService;
+        this.productSearchIndex = productSearchIndex;
         this.applicationTaskExecutor = applicationTaskExecutor;
         this.cacheTtl = Duration.ofSeconds(cacheTtlSeconds);
         this.hotCacheTtl = Duration.ofSeconds(hotCacheTtlSeconds);
@@ -111,7 +114,6 @@ public class ProductServiceImpl implements ProductService {
 
         Product product = new Product();
         product.setSellerId(userId);
-        product.setCampusId(request.getCampusId());
         product.setCategoryId(request.getCategoryId());
         product.setTitle(request.getTitle().trim());
         product.setPrice(request.getPrice());
@@ -129,6 +131,7 @@ public class ProductServiceImpl implements ProductService {
         product.setPublishedTime(LocalDateTime.now());
         product.setIsDeleted(0);
         productMapper.insert(product);
+        productSearchIndex.index(product);
         evictHotCache();
         return buildResponse(product, false);
     }
@@ -139,9 +142,6 @@ public class ProductServiceImpl implements ProductService {
         Product product = getOwnedProduct(productId);
         if (Integer.valueOf(PRODUCT_SOLD).equals(product.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "已售出的商品不能编辑");
-        }
-        if (request.getCampusId() != null) {
-            product.setCampusId(request.getCampusId());
         }
         if (request.getCategoryId() != null) {
             validateCategory(request.getCategoryId());
@@ -179,6 +179,7 @@ public class ProductServiceImpl implements ProductService {
         }
         validateTradeLocation(defaultInt(product.getDeliveryMethod(), 0), product.getLocation());
         productMapper.updateById(product);
+        productSearchIndex.index(product);
         evictDetailCache(productId);
         evictHotCache();
         return buildResponse(product, true);
@@ -196,6 +197,7 @@ public class ProductServiceImpl implements ProductService {
             product.setPublishedTime(LocalDateTime.now());
         }
         productMapper.updateById(product);
+        productSearchIndex.index(product);
         evictDetailCache(productId);
         evictHotCache();
     }
@@ -209,6 +211,7 @@ public class ProductServiceImpl implements ProductService {
         }
         product.setStatus(PRODUCT_OFF_SALE);
         productMapper.updateById(product);
+        productSearchIndex.index(product);
         evictDetailCache(productId);
         evictHotCache();
     }
@@ -263,11 +266,19 @@ public class ProductServiceImpl implements ProductService {
         if (status == null && request.getSellerId() == null) {
             status = PRODUCT_ON_SALE;
         }
+        List<Long> searchIds = productSearchIndex.search(request.getKeyword());
+        if (searchIds != null && searchIds.isEmpty()) {
+            return emptyPage(pageNo, pageSize);
+        }
         LambdaQueryWrapper<Product> query = Wrappers.lambdaQuery(Product.class)
-                .eq(request.getCampusId() != null, Product::getCampusId, request.getCampusId())
                 .eq(request.getSellerId() != null, Product::getSellerId, request.getSellerId())
                 .eq(status != null, Product::getStatus, status)
-                .like(StringUtils.hasText(request.getKeyword()), Product::getTitle, trimToNull(request.getKeyword()));
+                .like(searchIds == null && StringUtils.hasText(request.getKeyword()),
+                        Product::getTitle, trimToNull(request.getKeyword()));
+
+        if (searchIds != null) {
+            query.in(Product::getId, searchIds);
+        }
 
         if (request.getCategoryId() != null) {
             List<Long> categoryIds = resolveCategoryIds(request.getCategoryId());
@@ -491,7 +502,6 @@ public class ProductServiceImpl implements ProductService {
     private String hotCacheKey(ProductQueryRequest request, int pageNo, int pageSize) {
         return PRODUCT_HOT_CACHE_PREFIX
                 + pageNo + ":" + pageSize
-                + ":" + value(request.getCampusId())
                 + ":" + value(request.getCategoryId())
                 + ":" + value(request.getStatus())
                 + ":" + value(request.getSellerId())

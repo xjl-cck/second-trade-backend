@@ -16,7 +16,6 @@ public class Product {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long sellerId;
-    private Long campusId;
     private Long categoryId;
     private String title;
     private BigDecimal price;

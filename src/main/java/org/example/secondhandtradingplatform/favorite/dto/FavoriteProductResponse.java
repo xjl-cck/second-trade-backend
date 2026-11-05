@@ -13,7 +13,6 @@ public class FavoriteProductResponse {
     private Long sellerId;
     private String sellerNickname;
     private String sellerAvatar;
-    private Long campusId;
     private Long categoryId;
     private String title;
     private BigDecimal price;
@@ -34,7 +33,6 @@ public class FavoriteProductResponse {
         FavoriteProductResponse response = new FavoriteProductResponse();
         response.setId(product.getId());
         response.setSellerId(product.getSellerId());
-        response.setCampusId(product.getCampusId());
         response.setCategoryId(product.getCategoryId());
         response.setTitle(product.getTitle());
         response.setPrice(product.getPrice());

@@ -33,8 +33,6 @@ public class SysUser {
 
     private String grade;
 
-    private Long campusId;
-
     private Integer role;
 
     private Integer status;

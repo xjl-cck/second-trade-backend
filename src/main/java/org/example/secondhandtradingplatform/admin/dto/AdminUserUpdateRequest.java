@@ -30,8 +30,6 @@ public class AdminUserUpdateRequest {
     @Size(max = 32, message = "长度不能超过32")
     private String grade;
 
-    private Long campusId;
-
     @Min(value = 0, message = "角色只能为0或1")
     @Max(value = 1, message = "角色只能为0或1")
     private Integer role;

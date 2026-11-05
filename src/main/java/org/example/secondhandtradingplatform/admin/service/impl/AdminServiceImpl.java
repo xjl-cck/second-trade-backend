@@ -27,6 +27,7 @@ import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.entity.ProductImage;
 import org.example.secondhandtradingplatform.product.mapper.ProductImageMapper;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
+import org.example.secondhandtradingplatform.product.service.impl.ProductSearchIndex;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.dto.UserProfileResponse;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
@@ -56,19 +57,22 @@ public class AdminServiceImpl implements AdminService {
     private final CategoryMapper categoryMapper;
     private final TradeOrderMapper tradeOrderMapper;
     private final RedisCacheService redisCacheService;
+    private final ProductSearchIndex productSearchIndex;
 
     public AdminServiceImpl(ProductMapper productMapper,
                             ProductImageMapper productImageMapper,
                             SysUserMapper sysUserMapper,
                             CategoryMapper categoryMapper,
                             TradeOrderMapper tradeOrderMapper,
-                            RedisCacheService redisCacheService) {
+                            RedisCacheService redisCacheService,
+                            ProductSearchIndex productSearchIndex) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
         this.sysUserMapper = sysUserMapper;
         this.categoryMapper = categoryMapper;
         this.tradeOrderMapper = tradeOrderMapper;
         this.redisCacheService = redisCacheService;
+        this.productSearchIndex = productSearchIndex;
     }
 
     @Override
@@ -77,7 +81,6 @@ public class AdminServiceImpl implements AdminService {
         int pageNo = normalizePageNo(request.getPageNo());
         int pageSize = normalizePageSize(request.getPageSize());
         LambdaQueryWrapper<Product> query = Wrappers.lambdaQuery(Product.class)
-                .eq(request.getCampusId() != null, Product::getCampusId, request.getCampusId())
                 .eq(request.getCategoryId() != null, Product::getCategoryId, request.getCategoryId())
                 .eq(request.getSellerId() != null, Product::getSellerId, request.getSellerId())
                 .eq(request.getStatus() != null, Product::getStatus, request.getStatus())
@@ -111,7 +114,9 @@ public class AdminServiceImpl implements AdminService {
             product.setPublishedTime(LocalDateTime.now());
         }
         productMapper.updateById(product);
+        productSearchIndex.index(product);
         redisCacheService.delete("product:detail:" + productId);
+        redisCacheService.deleteByPattern("product:hot:*");
         return buildProductResponse(product, true);
     }
 
@@ -173,9 +178,6 @@ public class AdminServiceImpl implements AdminService {
         }
         if (request.getGrade() != null) {
             user.setGrade(trimToNull(request.getGrade()));
-        }
-        if (request.getCampusId() != null) {
-            user.setCampusId(request.getCampusId());
         }
         if (request.getRole() != null) {
             user.setRole(request.getRole());

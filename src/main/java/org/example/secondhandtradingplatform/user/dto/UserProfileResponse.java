@@ -28,8 +28,6 @@ public class UserProfileResponse {
     private String major;
     @Schema(description = "年级")
     private String grade;
-    @Schema(description = "校园ID")
-    private Long campusId;
     @Schema(description = "角色 0学生 1管理员")
     private Integer role;
     @Schema(description = "状态 0禁用 1正常 2封禁")
@@ -50,7 +48,6 @@ public class UserProfileResponse {
         response.setGender(user.getGender());
         response.setMajor(user.getMajor());
         response.setGrade(user.getGrade());
-        response.setCampusId(user.getCampusId());
         response.setRole(user.getRole());
         response.setStatus(user.getStatus());
         response.setLastLoginTime(user.getLastLoginTime());
