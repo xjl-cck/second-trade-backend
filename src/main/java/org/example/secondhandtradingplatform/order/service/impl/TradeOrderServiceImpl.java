@@ -95,6 +95,11 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         String lockKey = ORDER_LOCK_PREFIX + request.getProductId();
         String lockToken = redisCacheService.tryLock(lockKey, ORDER_LOCK_TTL);
         if (lockToken == null) {
+            // Redis 锁被其他请求持有时，订单可能已经提交完成，先回查幂等记录。
+            existingOrder = tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(buyerId, idempotencyKey);
+            if (existingOrder != null) {
+                return reuseExistingOrder(existingOrder, request.getProductId(), quantity, addressId);
+            }
             throw new BizException(ErrorCode.BUSINESS_ERROR, "订单正在处理中，请稍后重试");
         }
         boolean unlockAfterTransaction = TransactionSynchronizationManager.isSynchronizationActive();
@@ -301,7 +306,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             return false;
         }
         // 先关支付宝交易（幂等：交易不存在也算关闭），关不掉就让事务回滚，下一轮再试
-        if (!alipayTradeCloseService.closeQuietly(order.getOrderNo())) {
+        if (!alipayTradeCloseService.closePendingTrade(order.getOrderNo())) {
             throw new BizException(ErrorCode.SYSTEM_ERROR, "关闭支付宝交易失败，稍后重试");
         }
         doCancel(order, "超时未支付，系统自动关闭");

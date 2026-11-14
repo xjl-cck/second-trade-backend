@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 支付流水。一次订单支付对应一条记录，out_trade_no 与订单号一致以保证幂等。
+ * 支付流水。一次支付尝试对应一条记录，out_trade_no 用于支付宝侧幂等。
  */
 @Data
 @TableName("payment_record")

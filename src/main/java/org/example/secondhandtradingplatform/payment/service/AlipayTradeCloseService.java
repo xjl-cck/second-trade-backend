@@ -8,10 +8,10 @@ package org.example.secondhandtradingplatform.payment.service;
 public interface AlipayTradeCloseService {
 
     /**
-     * 关闭指定商户订单号对应的支付宝交易。
-     * 交易不存在、已关闭、或未启用支付宝时都视为「无需关闭」，返回 true。
+     * 关闭订单最新一笔待支付的支付宝交易。
+     * 交易不存在、已关闭、没有待支付流水或未启用支付宝时都视为「无需关闭」，返回 true。
      *
      * @return false 表示支付宝明确拒绝关闭，调用方应稍后重试
      */
-    boolean closeQuietly(String outTradeNo);
+    boolean closePendingTrade(String orderNo);
 }

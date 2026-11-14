@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS payment_record (
     pay_method VARCHAR(32) NOT NULL DEFAULT 'page' COMMENT '支付方式 page=电脑网站支付',
     amount DECIMAL(10,2) NOT NULL COMMENT '支付金额',
     buyer_id BIGINT UNSIGNED NOT NULL COMMENT '买家ID',
-    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待支付 1已支付 2已关闭 3支付异常待退款',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待支付 1已支付 2已关闭 3支付异常 4已自动退款',
     paid_time DATETIME DEFAULT NULL COMMENT '支付成功时间',
     notify_time DATETIME DEFAULT NULL COMMENT '最近一次收到通知时间',
     last_error VARCHAR(500) DEFAULT NULL COMMENT '异常原因',

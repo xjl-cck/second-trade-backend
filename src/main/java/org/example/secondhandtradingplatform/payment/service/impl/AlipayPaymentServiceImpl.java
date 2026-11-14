@@ -5,8 +5,10 @@ import com.alipay.api.AlipayClient;
 import com.alipay.api.internal.util.AlipaySignature;
 import com.alipay.api.request.AlipayTradePagePayRequest;
 import com.alipay.api.request.AlipayTradeQueryRequest;
+import com.alipay.api.request.AlipayTradeRefundRequest;
 import com.alipay.api.response.AlipayTradePagePayResponse;
 import com.alipay.api.response.AlipayTradeQueryResponse;
+import com.alipay.api.response.AlipayTradeRefundResponse;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,8 +54,10 @@ public class AlipayPaymentServiceImpl implements AlipayPaymentService {
     private static final int PAY_PENDING = 0;
     private static final int PAY_SUCCESS = 1;
     private static final int PAY_CLOSED = 2;
-    /** 支付宝已付款但本地订单状态不允许成交（如已取消），需要人工退款 */
+    /** 支付结果异常，需要重试或人工核对 */
     private static final int PAY_EXCEPTION = 3;
+    /** 订单取消后支付成功，款项已经自动原路退回 */
+    private static final int PAY_REFUNDED = 4;
 
     private static final String CHANNEL = "alipay";
     private static final String PAY_METHOD = "page";
@@ -190,7 +194,8 @@ public class AlipayPaymentServiceImpl implements AlipayPaymentService {
     }
 
     private void applyPaid(PaymentRecord record, String tradeNo, BigDecimal paidAmount, String rawNotify) {
-        if (Integer.valueOf(PAY_SUCCESS).equals(record.getStatus())) {
+        if (Integer.valueOf(PAY_SUCCESS).equals(record.getStatus())
+                || Integer.valueOf(PAY_REFUNDED).equals(record.getStatus())) {
             return;
         }
         TradeOrder order = tradeOrderMapper.selectByOrderNoForUpdate(record.getOrderNo());
@@ -208,13 +213,7 @@ public class AlipayPaymentServiceImpl implements AlipayPaymentService {
             return;
         }
         if (Integer.valueOf(ORDER_STATUS_CANCELED).equals(order.getStatus())) {
-            log.warn("订单已取消但收到支付成功通知，需要原路退款，orderNo={}，tradeNo={}", order.getOrderNo(), tradeNo);
-            record.setStatus(PAY_EXCEPTION);
-            record.setTradeNo(tradeNo);
-            record.setLastError("订单已取消，支付款项需要原路退款");
-            record.setNotifyTime(LocalDateTime.now());
-            record.setRawNotify(rawNotify);
-            paymentRecordMapper.updateById(record);
+            refundCanceledPayment(record, order, tradeNo, paidAmount, rawNotify);
             return;
         }
 
@@ -228,6 +227,44 @@ public class AlipayPaymentServiceImpl implements AlipayPaymentService {
         record.setLastError(null);
         paymentRecordMapper.updateById(record);
         log.info("支付宝支付成功已入账，orderNo={}，tradeNo={}，amount={}", order.getOrderNo(), tradeNo, paidAmount);
+    }
+
+    void refundCanceledPayment(PaymentRecord record, TradeOrder order, String tradeNo,
+                               BigDecimal paidAmount, String rawNotify) {
+        AlipayClient client = requireClient();
+        Map<String, Object> bizContent = new LinkedHashMap<>();
+        bizContent.put("out_trade_no", record.getOutTradeNo());
+        bizContent.put("refund_amount", formatAmount(paidAmount));
+        // 支付宝按 out_request_no 保证退款幂等；回调重试不会重复退款。
+        bizContent.put("out_request_no", "LR" + record.getId());
+        bizContent.put("refund_reason", "订单超时关闭后支付成功，自动原路退款");
+
+        AlipayTradeRefundRequest request = new AlipayTradeRefundRequest();
+        request.setBizContent(toJson(bizContent));
+        AlipayTradeRefundResponse response;
+        try {
+            response = client.execute(request);
+        } catch (AlipayApiException e) {
+            log.error("订单取消后的自动退款调用异常，orderNo={}，outTradeNo={}",
+                    order.getOrderNo(), record.getOutTradeNo(), e);
+            throw new BizException(ErrorCode.SYSTEM_ERROR, "自动退款失败，等待支付回调重试");
+        }
+        if (!response.isSuccess()) {
+            String message = StringUtils.hasText(response.getSubMsg()) ? response.getSubMsg() : response.getMsg();
+            log.error("订单取消后的自动退款失败，orderNo={}，outTradeNo={}，原因={}",
+                    order.getOrderNo(), record.getOutTradeNo(), message);
+            throw new BizException(ErrorCode.SYSTEM_ERROR, "自动退款失败，等待支付回调重试：" + message);
+        }
+
+        record.setStatus(PAY_REFUNDED);
+        record.setTradeNo(tradeNo);
+        record.setPaidTime(LocalDateTime.now());
+        record.setNotifyTime(LocalDateTime.now());
+        record.setRawNotify(rawNotify);
+        record.setLastError("订单已取消，支付款项已自动原路退款");
+        paymentRecordMapper.updateById(record);
+        log.warn("订单已取消但收到支付成功通知，款项已自动退款，orderNo={}，outTradeNo={}，tradeNo={}",
+                order.getOrderNo(), record.getOutTradeNo(), tradeNo);
     }
 
     private void markClosed(PaymentRecord record, String tradeNo, String rawNotify) {
