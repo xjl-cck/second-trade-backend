@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS outbox_event (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='事务消息出站表';
 
 ALTER TABLE trade_order
+    MODIFY COLUMN status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待确认 1已成交 2已取消 3已完成 4关单中',
     MODIFY COLUMN address_id BIGINT UNSIGNED DEFAULT NULL COMMENT '下单时选择的收货地址ID',
     MODIFY COLUMN receiver_name VARCHAR(32) DEFAULT NULL COMMENT '收件人快照',
     MODIFY COLUMN receiver_phone VARCHAR(20) DEFAULT NULL COMMENT '联系电话快照',

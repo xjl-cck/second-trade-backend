@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 
+import java.time.LocalDateTime;
+
 @Mapper
 public interface TradeOrderMapper extends BaseMapper<TradeOrder> {
 
@@ -33,4 +35,17 @@ public interface TradeOrderMapper extends BaseMapper<TradeOrder> {
                        @Param("expectedStatus") Integer expectedStatus,
                        @Param("canceledStatus") Integer canceledStatus,
                        @Param("closeReason") String closeReason);
+
+    @Update("update trade_order set status = #{closingStatus}, update_time = current_timestamp "
+            + "where id = #{orderId} and status = #{waitingStatus} and create_time < #{deadline} and is_deleted = 0")
+    int markClosingIfExpired(@Param("orderId") Long orderId,
+                             @Param("waitingStatus") Integer waitingStatus,
+                             @Param("closingStatus") Integer closingStatus,
+                             @Param("deadline") LocalDateTime deadline);
+
+    @Update("update trade_order set update_time = current_timestamp "
+            + "where id = #{orderId} and status = #{closingStatus} and update_time < #{staleBefore} and is_deleted = 0")
+    int claimClosingIfStale(@Param("orderId") Long orderId,
+                            @Param("closingStatus") Integer closingStatus,
+                            @Param("staleBefore") LocalDateTime staleBefore);
 }

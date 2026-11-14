@@ -25,15 +25,18 @@ public class OrderTimeoutCloseJob {
     private final boolean enabled;
     private final long timeoutMinutes;
     private final int batchSize;
+    private final long closingRetryMinutes;
 
     public OrderTimeoutCloseJob(TradeOrderService tradeOrderService,
                                 @Value("${app.order.auto-close-enabled:true}") boolean enabled,
                                 @Value("${app.order.timeout-minutes:30}") long timeoutMinutes,
-                                @Value("${app.order.auto-close-batch-size:50}") int batchSize) {
+                                @Value("${app.order.auto-close-batch-size:50}") int batchSize,
+                                @Value("${app.order.closing-retry-minutes:5}") long closingRetryMinutes) {
         this.tradeOrderService = tradeOrderService;
         this.enabled = enabled;
         this.timeoutMinutes = timeoutMinutes;
         this.batchSize = batchSize;
+        this.closingRetryMinutes = closingRetryMinutes;
     }
 
     @Scheduled(
@@ -52,22 +55,34 @@ public class OrderTimeoutCloseJob {
             log.warn("扫描超时未支付订单失败", e);
             return;
         }
-        if (orderIds.isEmpty()) {
-            return;
-        }
-        int closed = 0;
+        int queued = 0;
         for (Long orderId : orderIds) {
-            // 每笔订单独立事务：一笔失败不影响其它订单
             try {
-                if (tradeOrderService.closeTimeoutOrder(orderId, deadline)) {
-                    closed++;
+                if (tradeOrderService.markClosing(orderId, deadline)) {
+                    queued++;
                 }
             } catch (Exception e) {
-                log.warn("自动关闭超时订单失败，orderId={}，下一轮重试", orderId, e);
+                log.warn("投递超时关单命令失败，orderId={}，下一轮重试", orderId, e);
             }
         }
-        if (closed > 0) {
-            log.info("自动关闭超时未支付订单 {} 笔（本轮扫描 {} 笔）", closed, orderIds.size());
+        if (queued > 0) {
+            log.info("超时订单进入关单中 {} 笔（本轮扫描 {} 笔）", queued, orderIds.size());
+        }
+
+        LocalDateTime staleBefore = LocalDateTime.now().minusMinutes(Math.max(1, closingRetryMinutes));
+        List<Long> stuckOrderIds;
+        try {
+            stuckOrderIds = tradeOrderService.findStuckClosingOrderIds(staleBefore, batchSize);
+        } catch (Exception e) {
+            log.warn("扫描关单中订单失败", e);
+            return;
+        }
+        for (Long orderId : stuckOrderIds) {
+            try {
+                tradeOrderService.retryClosing(orderId, staleBefore);
+            } catch (Exception e) {
+                log.warn("重新投递关单命令失败，orderId={}，下一轮重试", orderId, e);
+            }
         }
     }
 }

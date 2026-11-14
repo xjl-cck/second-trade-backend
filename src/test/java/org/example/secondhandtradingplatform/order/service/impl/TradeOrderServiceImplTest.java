@@ -8,9 +8,9 @@ import org.example.secondhandtradingplatform.order.dto.OrderCreateRequest;
 import org.example.secondhandtradingplatform.order.dto.OrderResponse;
 import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 import org.example.secondhandtradingplatform.order.mapper.TradeOrderMapper;
+import org.example.secondhandtradingplatform.order.message.OrderClosePublisher;
 import org.example.secondhandtradingplatform.order.message.OrderEventPublisher;
 import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnRequestService;
-import org.example.secondhandtradingplatform.payment.service.AlipayTradeCloseService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
 import org.example.secondhandtradingplatform.security.UserContext;
@@ -23,8 +23,10 @@ import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,6 +52,7 @@ class TradeOrderServiceImplTest {
     private ShippingAddressService shippingAddressService;
     private ReturnRequestService returnRequestService;
     private OrderEventPublisher orderEventPublisher;
+    private OrderClosePublisher orderClosePublisher;
     private TradeOrderServiceImpl tradeOrderService;
 
     @BeforeEach
@@ -61,16 +64,16 @@ class TradeOrderServiceImplTest {
         shippingAddressService = mock(ShippingAddressService.class);
         returnRequestService = mock(ReturnRequestService.class);
         orderEventPublisher = mock(OrderEventPublisher.class);
-        AlipayTradeCloseService alipayTradeCloseService = mock(AlipayTradeCloseService.class);
+        orderClosePublisher = mock(OrderClosePublisher.class);
         tradeOrderService = new TradeOrderServiceImpl(
                 tradeOrderMapper,
                 productMapper,
                 sysUserMapper,
                 redisCacheService,
                 orderEventPublisher,
+                orderClosePublisher,
                 shippingAddressService,
-                returnRequestService,
-                alipayTradeCloseService
+                returnRequestService
         );
         UserContext.setUserId(BUYER_ID);
     }
@@ -185,6 +188,79 @@ class TradeOrderServiceImplTest {
         verify(productMapper, never()).selectByIdForUpdate(anyLong());
         verify(productMapper, never()).updateById(any(Product.class));
         verifyNoInteractions(orderEventPublisher);
+    }
+
+    @Test
+    @DisplayName("超时订单 CAS 成功时进入关单中并写入关单命令")
+    void markClosingPublishesCommandAfterCas() {
+        LocalDateTime deadline = LocalDateTime.now();
+        when(tradeOrderMapper.markClosingIfExpired(300L, 0, 4, deadline)).thenReturn(1);
+
+        assertTrue(tradeOrderService.markClosing(300L, deadline));
+
+        verify(orderClosePublisher).publish(300L);
+    }
+
+    @Test
+    @DisplayName("超时订单 CAS 失败时不写入关单命令")
+    void markClosingDoesNotPublishWhenCasFails() {
+        LocalDateTime deadline = LocalDateTime.now();
+        when(tradeOrderMapper.markClosingIfExpired(300L, 0, 4, deadline)).thenReturn(0);
+
+        assertFalse(tradeOrderService.markClosing(300L, deadline));
+
+        verifyNoInteractions(orderClosePublisher);
+    }
+
+    @Test
+    @DisplayName("完成关单 CAS 失败时不恢复库存")
+    void completeClosingRaceDoesNotRestoreStock() {
+        TradeOrder order = existingOrder(300L, 10L, 1, null);
+        order.setStatus(4);
+        when(tradeOrderMapper.selectById(300L)).thenReturn(order);
+        when(tradeOrderMapper.cancelIfStatus(300L, 4, 2, "超时未支付，系统自动关闭")).thenReturn(0);
+
+        assertFalse(tradeOrderService.completeClosing(300L));
+
+        verify(productMapper, never()).selectByIdForUpdate(anyLong());
+        verify(productMapper, never()).updateById(any(Product.class));
+        verifyNoInteractions(orderEventPublisher);
+    }
+
+    @Test
+    @DisplayName("完成关单 CAS 成功后恢复库存并重新上架商品")
+    void completeClosingRestoresStockOnlyAfterCasWins() {
+        TradeOrder order = existingOrder(300L, 10L, 1, null);
+        order.setStatus(4);
+        Product product = onSaleProduct(10L);
+        product.setStock(0);
+        product.setStatus(4);
+        when(tradeOrderMapper.selectById(300L)).thenReturn(order);
+        when(tradeOrderMapper.cancelIfStatus(300L, 4, 2, "超时未支付，系统自动关闭")).thenReturn(1);
+        when(productMapper.selectByIdForUpdate(10L)).thenReturn(product);
+
+        assertTrue(tradeOrderService.completeClosing(300L));
+
+        assertEquals(1, product.getStock());
+        assertEquals(2, product.getStatus());
+        verify(productMapper).updateById(product);
+        verify(orderEventPublisher).publish(any());
+    }
+
+    @Test
+    @DisplayName("支付成功可以把关单中订单推进为已成交")
+    void paymentCanWinFromClosingState() {
+        TradeOrder order = existingOrder(300L, 10L, 1, null);
+        order.setStatus(4);
+        Product product = onSaleProduct(10L);
+        when(tradeOrderMapper.selectByOrderNoForUpdate("SH300")).thenReturn(order);
+        when(productMapper.selectByIdForUpdate(10L)).thenReturn(product);
+        when(productMapper.selectById(10L)).thenReturn(product);
+
+        OrderResponse response = tradeOrderService.paySuccess("SH300", new BigDecimal("10.00"));
+
+        assertEquals(1, response.getStatus());
+        verify(tradeOrderMapper).updateById(order);
     }
 
     private void stubSuccessfulCreatePath(Long productId) {

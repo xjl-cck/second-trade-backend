@@ -42,6 +42,19 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public Queue orderCloseQueue() {
+        return durableQueueWithDeadLetter(properties.getOrderCloseQueue());
+    }
+
+    @Bean
+    public Binding orderCloseBinding(@Qualifier("orderExchange") DirectExchange orderExchange,
+                                     @Qualifier("orderCloseQueue") Queue orderCloseQueue) {
+        return BindingBuilder.bind(orderCloseQueue)
+                .to(orderExchange)
+                .with(properties.getOrderCloseRoutingKey());
+    }
+
+    @Bean
     public DirectExchange favoriteExchange() {
         return new DirectExchange(properties.getFavoriteExchange(), true, false);
     }

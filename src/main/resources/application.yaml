@@ -141,6 +141,7 @@ app:
     auto-close-interval-ms: ${ORDER_AUTO_CLOSE_INTERVAL_MS:60000}
     auto-close-initial-delay-ms: ${ORDER_AUTO_CLOSE_INITIAL_DELAY_MS:30000}
     auto-close-batch-size: ${ORDER_AUTO_CLOSE_BATCH_SIZE:50}
+    closing-retry-minutes: ${ORDER_CLOSING_RETRY_MINUTES:5}
   payment:
     # 退款对账：扫描「待退款/退款失败」的流水，回查支付宝补正
     refund-reconcile-enabled: ${REFUND_RECONCILE_ENABLED:true}
@@ -155,6 +156,8 @@ app:
     order-exchange: ${RABBITMQ_ORDER_EXCHANGE:order.events}
     order-queue: ${RABBITMQ_ORDER_QUEUE:order.notifications}
     order-routing-key: ${RABBITMQ_ORDER_ROUTING_KEY:order.status}
+    order-close-queue: ${RABBITMQ_ORDER_CLOSE_QUEUE:order.close.commands}
+    order-close-routing-key: ${RABBITMQ_ORDER_CLOSE_ROUTING_KEY:order.close.requested}
     favorite-exchange: ${RABBITMQ_FAVORITE_EXCHANGE:favorite.events}
     favorite-queue: ${RABBITMQ_FAVORITE_QUEUE:favorite.counts}
     favorite-routing-key: ${RABBITMQ_FAVORITE_ROUTING_KEY:favorite.count}

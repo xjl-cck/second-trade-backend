@@ -12,6 +12,8 @@ public class RabbitMqProperties {
     private String orderExchange;
     private String orderQueue;
     private String orderRoutingKey;
+    private String orderCloseQueue;
+    private String orderCloseRoutingKey;
     private String favoriteExchange;
     private String favoriteQueue;
     private String favoriteRoutingKey;

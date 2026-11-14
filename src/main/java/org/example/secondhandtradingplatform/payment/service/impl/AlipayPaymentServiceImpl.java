@@ -50,6 +50,7 @@ public class AlipayPaymentServiceImpl implements AlipayPaymentService {
     private static final int ORDER_STATUS_DEALED = 1;
     private static final int ORDER_STATUS_CANCELED = 2;
     private static final int ORDER_STATUS_FINISHED = 3;
+    private static final int ORDER_STATUS_CLOSING = 4;
 
     private static final int PAY_PENDING = 0;
     private static final int PAY_SUCCESS = 1;
@@ -435,6 +436,7 @@ public class AlipayPaymentServiceImpl implements AlipayPaymentService {
             case ORDER_STATUS_DEALED -> "已成交";
             case ORDER_STATUS_CANCELED -> "已取消";
             case ORDER_STATUS_FINISHED -> "已完成";
+            case ORDER_STATUS_CLOSING -> "关单中";
             default -> "未知";
         };
     }

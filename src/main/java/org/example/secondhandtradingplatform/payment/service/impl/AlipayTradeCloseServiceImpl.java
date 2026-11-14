@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.secondhandtradingplatform.payment.config.AlipayProperties;
 import org.example.secondhandtradingplatform.payment.entity.PaymentRecord;
 import org.example.secondhandtradingplatform.payment.mapper.PaymentRecordMapper;
+import org.example.secondhandtradingplatform.payment.service.AlipayTradeCloseResult;
 import org.example.secondhandtradingplatform.payment.service.AlipayTradeCloseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,8 @@ public class AlipayTradeCloseServiceImpl implements AlipayTradeCloseService {
     private static final String TRADE_NOT_EXIST = "ACQ.TRADE_NOT_EXIST";
     /** 重试关单时支付宝侧已经关闭，按幂等成功处理 */
     private static final String TRADE_ALREADY_CLOSED = "ACQ.TRADE_HAS_CLOSE";
+    /** 关单时交易已经支付，不能取消本地订单 */
+    private static final String TRADE_ALREADY_PAID = "ACQ.TRADE_HAS_SUCCESS";
     private static final int PAY_PENDING = 0;
     private static final int PAY_CLOSED = 2;
 
@@ -48,28 +51,29 @@ public class AlipayTradeCloseServiceImpl implements AlipayTradeCloseService {
     }
 
     @Override
-    public boolean closePendingTrade(String orderNo) {
+    public AlipayTradeCloseResult closePendingTrade(String orderNo) {
         PaymentRecord pending = paymentRecordMapper.selectOne(Wrappers.<PaymentRecord>lambdaQuery()
                 .eq(PaymentRecord::getOrderNo, orderNo)
                 .eq(PaymentRecord::getStatus, PAY_PENDING)
                 .orderByDesc(PaymentRecord::getId)
                 .last("limit 1"));
         if (pending == null) {
-            return true;
+            return AlipayTradeCloseResult.closed(null);
         }
-        if (!closeQuietly(pending.getOutTradeNo())) {
-            return false;
+        AlipayTradeCloseResult result = closeQuietly(pending.getOutTradeNo());
+        if (result.status() != AlipayTradeCloseResult.Status.CLOSED) {
+            return result;
         }
         pending.setStatus(PAY_CLOSED);
         pending.setLastError(null);
         paymentRecordMapper.updateById(pending);
-        return true;
+        return result;
     }
 
-    private boolean closeQuietly(String outTradeNo) {
+    private AlipayTradeCloseResult closeQuietly(String outTradeNo) {
         AlipayClient client = alipayClientProvider.getIfAvailable();
         if (!properties.isEnabled() || client == null || !StringUtils.hasText(outTradeNo)) {
-            return true;
+            return AlipayTradeCloseResult.closed(outTradeNo);
         }
         Map<String, Object> bizContent = new LinkedHashMap<>();
         bizContent.put("out_trade_no", outTradeNo);
@@ -80,19 +84,23 @@ public class AlipayTradeCloseServiceImpl implements AlipayTradeCloseService {
             AlipayTradeCloseResponse response = client.execute(request);
             if (response.isSuccess()) {
                 log.info("支付宝交易已关闭，outTradeNo={}", outTradeNo);
-                return true;
+                return AlipayTradeCloseResult.closed(outTradeNo);
             }
             if (TRADE_NOT_EXIST.equals(response.getSubCode())
                     || TRADE_ALREADY_CLOSED.equals(response.getSubCode())) {
                 log.debug("支付宝交易不存在或已经关闭，无需重复关闭，outTradeNo={}", outTradeNo);
-                return true;
+                return AlipayTradeCloseResult.closed(outTradeNo);
+            }
+            if (TRADE_ALREADY_PAID.equals(response.getSubCode())) {
+                log.info("支付宝交易已支付，不能关单，outTradeNo={}", outTradeNo);
+                return AlipayTradeCloseResult.paid(outTradeNo);
             }
             log.warn("关闭支付宝交易失败，outTradeNo={}，subCode={}，subMsg={}",
                     outTradeNo, response.getSubCode(), response.getSubMsg());
-            return false;
+            return AlipayTradeCloseResult.unknown(outTradeNo);
         } catch (AlipayApiException e) {
             log.warn("调用支付宝关单接口异常，outTradeNo={}", outTradeNo, e);
-            return false;
+            return AlipayTradeCloseResult.unknown(outTradeNo);
         }
     }
 

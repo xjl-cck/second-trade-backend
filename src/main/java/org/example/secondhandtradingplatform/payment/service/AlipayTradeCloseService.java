@@ -9,9 +9,7 @@ public interface AlipayTradeCloseService {
 
     /**
      * 关闭订单最新一笔待支付的支付宝交易。
-     * 交易不存在、已关闭、没有待支付流水或未启用支付宝时都视为「无需关闭」，返回 true。
-     *
-     * @return false 表示支付宝明确拒绝关闭，调用方应稍后重试
+     * 返回 CLOSED 时可以安全取消本地订单；PAID 时应同步支付结果；UNKNOWN 时保持关单中并重试。
      */
-    boolean closePendingTrade(String orderNo);
+    AlipayTradeCloseResult closePendingTrade(String orderNo);
 }

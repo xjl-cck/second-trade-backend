@@ -24,11 +24,17 @@ public interface TradeOrderService {
      */
     List<Long> findTimeoutOrderIds(LocalDateTime deadline, int limit);
 
-    /**
-     * 关闭单笔超时未支付订单：先关支付宝交易，再回滚库存并把订单置为已取消。
-     * 订单状态已变化或还没到超时时间时返回 false。
-     */
-    boolean closeTimeoutOrder(Long orderId, LocalDateTime deadline);
+    /** 抢占一笔超时订单并写入异步关单命令。 */
+    boolean markClosing(Long orderId, LocalDateTime deadline);
+
+    /** 支付宝确认关闭后，把关单中的订单置为已取消并恢复库存。 */
+    boolean completeClosing(Long orderId);
+
+    /** 查询长时间停留在关单中的订单，供补偿任务重新投递。 */
+    List<Long> findStuckClosingOrderIds(LocalDateTime staleBefore, int limit);
+
+    /** 抢占一笔卡住的关单并重新写入异步关单命令。 */
+    boolean retryClosing(Long orderId, LocalDateTime staleBefore);
 
     OrderResponse confirm(Long orderId);
 

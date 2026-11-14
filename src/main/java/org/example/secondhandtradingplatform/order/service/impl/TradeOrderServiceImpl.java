@@ -14,12 +14,12 @@ import org.example.secondhandtradingplatform.order.dto.OrderQueryRequest;
 import org.example.secondhandtradingplatform.order.dto.OrderResponse;
 import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 import org.example.secondhandtradingplatform.order.mapper.TradeOrderMapper;
+import org.example.secondhandtradingplatform.order.message.OrderClosePublisher;
 import org.example.secondhandtradingplatform.order.message.OrderEventPublisher;
 import org.example.secondhandtradingplatform.order.message.OrderStatusEvent;
 import org.example.secondhandtradingplatform.order.returnrequest.dto.ReturnRequestResponse;
 import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnRequestService;
 import org.example.secondhandtradingplatform.order.service.TradeOrderService;
-import org.example.secondhandtradingplatform.payment.service.AlipayTradeCloseService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
 import org.example.secondhandtradingplatform.security.UserContext;
@@ -50,6 +50,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private static final int ORDER_DEALED = 1;
     private static final int ORDER_CANCELED = 2;
     private static final int ORDER_FINISHED = 3;
+    private static final int ORDER_CLOSING = 4;
     private static final int DELIVERY_BY_SELLER = 2;
     private static final Duration ORDER_LOCK_TTL = Duration.ofSeconds(10);
     private static final String ORDER_LOCK_PREFIX = "lock:order:product:";
@@ -59,26 +60,26 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private final SysUserMapper sysUserMapper;
     private final RedisCacheService redisCacheService;
     private final OrderEventPublisher orderEventPublisher;
+    private final OrderClosePublisher orderClosePublisher;
     private final ShippingAddressService shippingAddressService;
     private final ReturnRequestService returnRequestService;
-    private final AlipayTradeCloseService alipayTradeCloseService;
 
     public TradeOrderServiceImpl(TradeOrderMapper tradeOrderMapper,
                                  ProductMapper productMapper,
                                  SysUserMapper sysUserMapper,
                                  RedisCacheService redisCacheService,
                                  OrderEventPublisher orderEventPublisher,
+                                 OrderClosePublisher orderClosePublisher,
                                  ShippingAddressService shippingAddressService,
-                                 ReturnRequestService returnRequestService,
-                                 AlipayTradeCloseService alipayTradeCloseService) {
+                                 ReturnRequestService returnRequestService) {
         this.tradeOrderMapper = tradeOrderMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
         this.redisCacheService = redisCacheService;
         this.orderEventPublisher = orderEventPublisher;
+        this.orderClosePublisher = orderClosePublisher;
         this.shippingAddressService = shippingAddressService;
         this.returnRequestService = returnRequestService;
-        this.alipayTradeCloseService = alipayTradeCloseService;
     }
 
     @Override
@@ -230,7 +231,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (paidAmount == null || order.getAmount() == null || paidAmount.compareTo(order.getAmount()) != 0) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "支付金额与订单金额不一致");
         }
-        return deal(order, "订单状态不是待确认，不能支付");
+        return deal(order, true, "订单状态不是待确认或关单中，不能支付");
     }
 
     @Override
@@ -241,7 +242,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (!userId.equals(order.getSellerId())) {
             throw new BizException(ErrorCode.FORBIDDEN, "只有卖家可以确认成交");
         }
-        return deal(order, "订单状态不是待确认，不能确认成交");
+        return deal(order, false, "订单状态不是待确认，不能确认成交");
     }
 
     @Override
@@ -269,7 +270,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (!Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "只有待确认订单可以取消");
         }
-        if (!doCancel(order, trimToNull(request == null ? null : request.getReason()))) {
+        if (!doCancel(order, ORDER_WAIT_CONFIRM, trimToNull(request == null ? null : request.getReason()))) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "订单状态已变化，取消失败");
         }
         return buildResponse(order);
@@ -289,24 +290,52 @@ public class TradeOrderServiceImpl implements TradeOrderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean closeTimeoutOrder(Long orderId, LocalDateTime deadline) {
-        TradeOrder order = tradeOrderMapper.selectByIdForUpdate(orderId);
-        if (order == null || !Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus())) {
+    public boolean markClosing(Long orderId, LocalDateTime deadline) {
+        int affected = tradeOrderMapper.markClosingIfExpired(
+                orderId, ORDER_WAIT_CONFIRM, ORDER_CLOSING, deadline);
+        if (affected == 0) {
             return false;
         }
-        if (order.getCreateTime() == null || !order.getCreateTime().isBefore(deadline)) {
-            return false;
-        }
-        // 先关支付宝交易（幂等：交易不存在也算关闭），关不掉就让事务回滚，下一轮再试
-        if (!alipayTradeCloseService.closePendingTrade(order.getOrderNo())) {
-            throw new BizException(ErrorCode.SYSTEM_ERROR, "关闭支付宝交易失败，稍后重试");
-        }
-        return doCancel(order, "超时未支付，系统自动关闭");
+        orderClosePublisher.publish(orderId);
+        return true;
     }
 
-    private boolean doCancel(TradeOrder order, String closeReason) {
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean completeClosing(Long orderId) {
+        TradeOrder order = tradeOrderMapper.selectById(orderId);
+        if (order == null) {
+            return false;
+        }
+        return doCancel(order, ORDER_CLOSING, "超时未支付，系统自动关闭");
+    }
+
+    @Override
+    public List<Long> findStuckClosingOrderIds(LocalDateTime staleBefore, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        List<TradeOrder> orders = tradeOrderMapper.selectList(Wrappers.<TradeOrder>lambdaQuery()
+                .select(TradeOrder::getId)
+                .eq(TradeOrder::getStatus, ORDER_CLOSING)
+                .lt(TradeOrder::getUpdateTime, staleBefore)
+                .orderByAsc(TradeOrder::getId)
+                .last("limit " + safeLimit));
+        return orders.stream().map(TradeOrder::getId).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean retryClosing(Long orderId, LocalDateTime staleBefore) {
+        int affected = tradeOrderMapper.claimClosingIfStale(orderId, ORDER_CLOSING, staleBefore);
+        if (affected == 0) {
+            return false;
+        }
+        orderClosePublisher.publish(orderId);
+        return true;
+    }
+
+    private boolean doCancel(TradeOrder order, int expectedStatus, String closeReason) {
         int affected = tradeOrderMapper.cancelIfStatus(
-                order.getId(), ORDER_WAIT_CONFIRM, ORDER_CANCELED, closeReason);
+                order.getId(), expectedStatus, ORDER_CANCELED, closeReason);
         if (affected == 0) {
             return false;
         }
@@ -359,8 +388,10 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         return responsePage;
     }
 
-    private OrderResponse deal(TradeOrder order, String errorMessage) {
-        if (!Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus())) {
+    private OrderResponse deal(TradeOrder order, boolean allowClosing, String errorMessage) {
+        boolean waiting = Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus());
+        boolean closing = allowClosing && Integer.valueOf(ORDER_CLOSING).equals(order.getStatus());
+        if (!waiting && !closing) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, errorMessage);
         }
         Product product = productMapper.selectByIdForUpdate(order.getProductId());
