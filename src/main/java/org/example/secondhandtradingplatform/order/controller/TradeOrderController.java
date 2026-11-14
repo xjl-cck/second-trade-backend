@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/orders")
-@Tag(name = "订单模块", description = "下单、模拟支付、确认成交、取消和完成订单")
+@Tag(name = "订单模块", description = "下单、确认成交、取消和完成订单")
 public class TradeOrderController {
 
     private final TradeOrderService tradeOrderService;
@@ -32,12 +32,6 @@ public class TradeOrderController {
     @Operation(summary = "下单", description = "买家对上架商品下单；卖家配送商品需要选择收货地址")
     public Result<OrderResponse> create(@Valid @RequestBody OrderCreateRequest request) {
         return Result.success(tradeOrderService.create(request));
-    }
-
-    @PostMapping("/{orderId}/pay")
-    @Operation(summary = "模拟支付", description = "买家模拟支付，将待确认订单推进为已成交，并把商品标记为已售出")
-    public Result<OrderResponse> pay(@PathVariable Long orderId) {
-        return Result.success(tradeOrderService.pay(orderId));
     }
 
     @PostMapping("/{orderId}/confirm")

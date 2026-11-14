@@ -49,6 +49,7 @@ class TradeOrderServiceImplTest {
     private RedisCacheService redisCacheService;
     private ShippingAddressService shippingAddressService;
     private ReturnRequestService returnRequestService;
+    private OrderEventPublisher orderEventPublisher;
     private TradeOrderServiceImpl tradeOrderService;
 
     @BeforeEach
@@ -59,7 +60,7 @@ class TradeOrderServiceImplTest {
         redisCacheService = mock(RedisCacheService.class);
         shippingAddressService = mock(ShippingAddressService.class);
         returnRequestService = mock(ReturnRequestService.class);
-        OrderEventPublisher orderEventPublisher = mock(OrderEventPublisher.class);
+        orderEventPublisher = mock(OrderEventPublisher.class);
         AlipayTradeCloseService alipayTradeCloseService = mock(AlipayTradeCloseService.class);
         tradeOrderService = new TradeOrderServiceImpl(
                 tradeOrderMapper,
@@ -168,6 +169,22 @@ class TradeOrderServiceImplTest {
         assertEquals(ErrorCode.IDEMPOTENCY_CONFLICT.getCode(), exception.getCode());
         assertTrue(exception.getMessage().contains("商品 10 变为 11"));
         verify(productMapper, never()).updateById(any(Product.class));
+    }
+
+    @Test
+    @DisplayName("取消订单 CAS 失败时不恢复库存、不发布取消事件")
+    void cancelRaceDoesNotRestoreStock() {
+        TradeOrder order = existingOrder(300L, 10L, 1, null);
+        when(tradeOrderMapper.selectByIdForUpdate(300L)).thenReturn(order);
+        when(tradeOrderMapper.cancelIfStatus(300L, 0, 2, null)).thenReturn(0);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> tradeOrderService.cancel(300L, null));
+
+        assertEquals(ErrorCode.BUSINESS_ERROR.getCode(), exception.getCode());
+        verify(productMapper, never()).selectByIdForUpdate(anyLong());
+        verify(productMapper, never()).updateById(any(Product.class));
+        verifyNoInteractions(orderEventPublisher);
     }
 
     private void stubSuccessfulCreatePath(Long productId) {

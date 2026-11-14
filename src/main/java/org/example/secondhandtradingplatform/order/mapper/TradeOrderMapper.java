@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 import org.example.secondhandtradingplatform.order.entity.TradeOrder;
 
 @Mapper
@@ -25,4 +26,11 @@ public interface TradeOrderMapper extends BaseMapper<TradeOrder> {
 
     @Select("select * from trade_order where order_no = #{orderNo} and is_deleted = 0 limit 1 for update")
     TradeOrder selectByOrderNoForUpdate(@Param("orderNo") String orderNo);
+
+    @Update("update trade_order set status = #{canceledStatus}, close_reason = #{closeReason} "
+            + "where id = #{orderId} and status = #{expectedStatus} and is_deleted = 0")
+    int cancelIfStatus(@Param("orderId") Long orderId,
+                       @Param("expectedStatus") Integer expectedStatus,
+                       @Param("canceledStatus") Integer canceledStatus,
+                       @Param("closeReason") String closeReason);
 }

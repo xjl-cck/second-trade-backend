@@ -215,17 +215,6 @@ public class TradeOrderServiceImpl implements TradeOrderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public OrderResponse pay(Long orderId) {
-        TradeOrder order = getOrderForCurrentUserForUpdate(orderId);
-        Long userId = requireLoginUserId();
-        if (!userId.equals(order.getBuyerId())) {
-            throw new BizException(ErrorCode.FORBIDDEN, "只有买家可以模拟支付");
-        }
-        return deal(order, "订单状态不是待确认，不能支付");
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
     public OrderResponse paySuccess(String orderNo, BigDecimal paidAmount) {
         TradeOrder order = tradeOrderMapper.selectByOrderNoForUpdate(orderNo);
         if (order == null) {
@@ -280,7 +269,10 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (!Integer.valueOf(ORDER_WAIT_CONFIRM).equals(order.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "只有待确认订单可以取消");
         }
-        return doCancel(order, trimToNull(request == null ? null : request.getReason()));
+        if (!doCancel(order, trimToNull(request == null ? null : request.getReason()))) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "订单状态已变化，取消失败");
+        }
+        return buildResponse(order);
     }
 
     @Override
@@ -309,14 +301,17 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (!alipayTradeCloseService.closePendingTrade(order.getOrderNo())) {
             throw new BizException(ErrorCode.SYSTEM_ERROR, "关闭支付宝交易失败，稍后重试");
         }
-        doCancel(order, "超时未支付，系统自动关闭");
-        return true;
+        return doCancel(order, "超时未支付，系统自动关闭");
     }
 
-    private OrderResponse doCancel(TradeOrder order, String closeReason) {
+    private boolean doCancel(TradeOrder order, String closeReason) {
+        int affected = tradeOrderMapper.cancelIfStatus(
+                order.getId(), ORDER_WAIT_CONFIRM, ORDER_CANCELED, closeReason);
+        if (affected == 0) {
+            return false;
+        }
         order.setStatus(ORDER_CANCELED);
         order.setCloseReason(closeReason);
-        tradeOrderMapper.updateById(order);
         Product canceledProduct = productMapper.selectByIdForUpdate(order.getProductId());
         if (canceledProduct != null) {
             int quantity = order.getQuantity() == null ? 1 : order.getQuantity();
@@ -327,7 +322,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             productMapper.updateById(canceledProduct);
         }
         orderEventPublisher.publish(buildEvent(order, null, "订单已取消"));
-        return buildResponse(order);
+        return true;
     }
 
     @Override
