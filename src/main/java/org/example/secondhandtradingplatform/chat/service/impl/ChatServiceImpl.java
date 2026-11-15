@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.secondhandtradingplatform.chat.dto.ChatMessageResponse;
 import org.example.secondhandtradingplatform.chat.dto.ChatMessageSendRequest;
+import org.example.secondhandtradingplatform.chat.dto.ChatReplayResponse;
 import org.example.secondhandtradingplatform.chat.dto.ChatSessionCreateRequest;
 import org.example.secondhandtradingplatform.chat.dto.ChatSessionResponse;
 import org.example.secondhandtradingplatform.chat.entity.ChatMessage;
@@ -24,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -31,6 +34,8 @@ public class ChatServiceImpl implements ChatService {
 
     private static final int UNREAD = 0;
     private static final int READ = 1;
+    /** 单次补发的硬上限，防止配置写错把整库未读一次性推给客户端 */
+    private static final int MAX_REPLAY_MESSAGES = 500;
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
@@ -156,7 +161,9 @@ public class ChatServiceImpl implements ChatService {
 
         session.setLastMessage(content);
         session.setLastMessageTime(message.getSendTime());
-        session.setUnreadCount((session.getUnreadCount() == null ? 0 : session.getUnreadCount()) + 1);
+        // 不再维护 chat_session.unread_count：这一列是"会话级"的，而未读是"用户级"的，
+        // 同一个会话里买家和卖家的未读数不同，一列表达不了两个值。
+        // 未读统一以 chat_message 里 receiver_id + read_status 的实时统计为准（见 buildSessionResponse）。
         chatSessionMapper.updateById(session);
         ChatMessageResponse response = ChatMessageResponse.from(message);
         chatMessagePublisher.publish(response);
@@ -173,15 +180,22 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
-    public List<ChatMessageResponse> listUnreadMessages(Long userId) {
-        return chatMessageMapper.selectList(Wrappers.<ChatMessage>lambdaQuery()
-                        .eq(ChatMessage::getReceiverId, userId)
-                        .eq(ChatMessage::getReadStatus, UNREAD)
-                        .orderByAsc(ChatMessage::getSendTime)
-                        .orderByAsc(ChatMessage::getId))
-                .stream()
+    public ChatReplayResponse replayUnreadMessages(Long userId, int maxMessages) {
+        int limit = Math.max(1, Math.min(maxMessages, MAX_REPLAY_MESSAGES));
+        // 取"最近"的未读而不是最早的：积压很多时，用户最需要看到的是最新的消息，
+        // 更早的未读仍然留在库里，打开会话时按历史分页拉取。
+        List<ChatMessage> rows = chatMessageMapper.selectList(Wrappers.<ChatMessage>lambdaQuery()
+                .eq(ChatMessage::getReceiverId, userId)
+                .eq(ChatMessage::getReadStatus, UNREAD)
+                .orderByDesc(ChatMessage::getSendTime)
+                .orderByDesc(ChatMessage::getId)
+                .last("limit " + (limit + 1)));
+        boolean truncated = rows.size() > limit;
+        List<ChatMessage> sliced = truncated ? new ArrayList<>(rows.subList(0, limit)) : new ArrayList<>(rows);
+        Collections.reverse(sliced);
+        return new ChatReplayResponse(truncated, sliced.stream()
                 .map(ChatMessageResponse::from)
-                .toList();
+                .toList());
     }
 
     private ChatSession getParticipantSession(Long sessionId, Long userId) {

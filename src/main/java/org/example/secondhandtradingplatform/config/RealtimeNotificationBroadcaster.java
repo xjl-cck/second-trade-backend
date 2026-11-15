@@ -9,6 +9,8 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +23,15 @@ public class RealtimeNotificationBroadcaster {
 
     public RealtimeNotificationBroadcaster(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 本机所有连接的快照，供心跳任务遍历。跨节点不可见，所以只用于本节点保活。
+     */
+    public List<WebSocketSession> activeSessions() {
+        List<WebSocketSession> snapshot = new ArrayList<>();
+        sessionsByUser.values().forEach(snapshot::addAll);
+        return snapshot;
     }
 
     public void register(WebSocketSession session, Long userId) {

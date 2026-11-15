@@ -134,6 +134,13 @@ app:
     flush-interval-ms: ${FAVORITE_FLUSH_INTERVAL_MS:30000}
     initial-delay-ms: ${FAVORITE_FLUSH_INITIAL_DELAY_MS:10000}
     redis-ttl-seconds: ${FAVORITE_REDIS_TTL_SECONDS:1800}
+  chat:
+    # 重连时最多补发多少条未读：未读很多时只推最近一批，更早的由客户端打开会话时拉历史
+    replay-max-messages: ${CHAT_REPLAY_MAX_MESSAGES:100}
+    # 连接超过这个时间没有心跳就算离线（服务端每 heartbeat-interval 发一次 ping）
+    presence-ttl-seconds: ${CHAT_PRESENCE_TTL_SECONDS:90}
+    heartbeat-interval-ms: ${CHAT_HEARTBEAT_INTERVAL_MS:30000}
+    heartbeat-initial-delay-ms: ${CHAT_HEARTBEAT_INITIAL_DELAY_MS:15000}
   order:
     # 超过这么久还没支付的订单由定时任务自动关闭：关支付宝交易 + 回滚库存
     timeout-minutes: ${ORDER_PAY_TIMEOUT_MINUTES:30}
