@@ -4,7 +4,11 @@ import jakarta.validation.constraints.Min;
 import lombok.Data;
 
 @Data
-public class OrderQueryRequest {
+public class
+
+
+
+OrderQueryRequest {
 
     private Integer status;
     private String role;

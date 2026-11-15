@@ -83,8 +83,8 @@ ALIPAY_NOTIFY_URL=https://你的域名/api/payments/alipay/notify
 ALIPAY_RETURN_URL=https://你的域名/api/payments/alipay/return
 ```
 
-- `ALIPAY_ENABLED=false` 时，`payment` 接口返回「支付宝支付未启用」的业务异常，
-  原来的 `POST /api/orders/{id}/pay` 模拟支付继续可用，便于没有密钥时演示。
+- `ALIPAY_ENABLED=false` 时，`payment` 接口返回「支付宝支付未启用」的业务异常。
+- 项目已删除 `POST /api/orders/{id}/pay` 模拟支付入口，避免登录用户绕过真实付款直接把订单推进为已成交。
 - 私钥文件里带 `-----BEGIN PRIVATE KEY-----` 头尾也能识别，会自动去掉并压缩空白。
 
 ## 5. 本地联调（关键）
@@ -111,7 +111,7 @@ cpolar http 8081
 创建订单(status=0 待确认)
    └─ POST /pay/{orderId} → 写 payment_record(status=0 待支付) → 返回收银台表单
         └─ 支付宝付款
-             ├─ notify(TRADE_SUCCESS) → 验签 → 校验金额 → order.paySuccess() → 订单 status=1 已成交、商品置为已售出
+             ├─ notify(TRADE_SUCCESS) → 验签 → 校验金额 → 订单 status=0/4 → status=1 已成交
              └─ TRADE_CLOSED → payment_record.status=2
 ```
 
@@ -121,9 +121,9 @@ cpolar http 8081
 - **金额校验**：通知里的 `total_amount` 必须与订单金额完全相等，避免改价攻击。
 - **幂等**：`payment_record` 已支付时直接返回；`trade_order` 已成交时 `paySuccess` 也直接返回。
   重复通知、通知与主动查询并发调用都不会重复推进订单。
-- **并发**：入账前先 `select ... for update` 锁订单行，与 `pay()` 共用同一条状态机。
-- **异常留痕**：金额不一致、订单已取消却收到支付成功，都会把流水置为 `status=3 支付异常待退款`
-  并把原因写进 `last_error`、原文写进 `raw_notify`，便于人工对账退款。
+- **并发**：入账前先 `select ... for update` 锁订单行；支付成功允许从 `0待确认` 或 `4关单中` 推进为 `1已成交`。
+- **金额异常留痕**：金额不一致时把流水置为 `status=3 支付异常`，并记录 `last_error` 与通知原文。
+- **取消后晚到支付**：订单已经是 `2已取消` 时收到支付成功通知，使用 `out_request_no = LR + payment_record.id` 自动原路退款；重复通知不会重复退款。
 - **重复下单**：历史支付单已关闭时，新的 `out_trade_no` 会追加 `R+时间戳`，避免支付宝返回 `TRADE_HAS_CLOSE`。
 - **支付超时**：`alipay.timeout-express`（默认 30m）到期后支付宝自动关闭交易，`syncFromAlipay` 会把流水置为已关闭。
 
@@ -150,7 +150,7 @@ POST /api/return-requests/{id}/complete
 - **幂等**：`out_request_no = RF + 退货单ID`，重复点确认不会退两次；同一退货单复用同一条退款流水（`return_request_id` 唯一索引）。
 - **独立事务**：退款是资金操作，结果必须先落库。如果用外层事务，失败信息会跟着回滚，事后无从排查。
 - **失败可重试**：失败时退货单停在「退货中」，卖家可以再点一次，`out_request_no` 不变，支付宝侧不会重复扣。
-- **非支付宝订单**：`payment_record` 没有已支付流水（比如用的模拟支付 `/api/orders/{id}/pay`），直接跳过线上退款，行为与以前一致。
+- **无支付流水订单**：历史数据或人工导入订单没有支付宝已支付流水时，直接跳过线上退款。
 - **对账补偿**：`GET /api/payments/alipay/refund/{returnRequestId}` 会调 `alipay.trade.fastpay.refund.query` 主动核对，前端可轮询。
 
 退款表 `payment_refund` 记录 `out_request_no`、`refund_fee`、`fund_change`、失败原因，可用于对账。
@@ -163,14 +163,18 @@ POST /api/return-requests/{id}/complete
 
 ```
 每 60s 扫描 trade_order(status=0 且 create_time < now-30min) → 最多 50 笔
-   └─ 逐笔独立事务：
-        1. alipay.trade.close(out_trade_no)   ← 幂等；ACQ.TRADE_NOT_EXIST 也算已关
-        2. 回滚库存 stock += quantity，商品若已售出则恢复上架
-        3. 订单 status=2 已取消，close_reason=「超时未支付，系统自动关闭」
-        4. 走 outbox 发「订单已取消」事件
+   └─ 短事务 CAS：订单 status=0 → status=4 关单中
+        └─ 同事务写 Outbox 关单命令 → RabbitMQ order.close.commands
+             └─ 消费者（无数据库事务）调用 alipay.trade.close(out_trade_no)
+                  ├─ CLOSED：短事务 CAS status=4 → status=2，成功后才回补库存
+                  ├─ PAID：主动查询支付宝并把 status=4 → status=1 已成交
+                  └─ UNKNOWN：抛出异常触发 MQ 重试，订单保持 status=4
+
+每 60s 额外扫描长时间停留在 status=4 的订单
+   └─ CAS 更新时间抢占后重新写入同一条 Outbox 关单命令
 ```
 
-关不掉支付宝交易时抛异常回滚，下一轮重试，不会出现“本地关了、支付宝还挂着能付款”的情况。
+支付宝 RPC 不在数据库事务内执行，因此不会因为网络抖动长期持有订单行锁。支付回调与关单消费者都使用带来源状态的更新决定胜负，库存只在 `4 → 2` 成功后恢复；结果未知时保持关单中，等待消息重试或定时补偿。
 
 ### 9.2 退款对账 `RefundReconcileJob`
 
@@ -190,12 +194,13 @@ POST /api/return-requests/{id}/complete
 | `ORDER_AUTO_CLOSE_ENABLED` | true | 关单开关 |
 | `ORDER_AUTO_CLOSE_INTERVAL_MS` | 60000 | 扫描间隔 |
 | `ORDER_AUTO_CLOSE_BATCH_SIZE` | 50 | 单轮批量 |
+| `ORDER_CLOSING_RETRY_MINUTES` | 5 | 关单中订单超过多久重新投递 |
 | `REFUND_RECONCILE_ENABLED` | true | 对账开关 |
 | `REFUND_RECONCILE_INTERVAL_MS` | 300000 | 对账间隔 |
 | `REFUND_RECONCILE_BATCH_SIZE` | 50 | 单轮批量 |
 
-本地验证关单：把 `ORDER_PAY_TIMEOUT_MINUTES` 临时设成 `1`，下单后等两分钟，看日志出现
-`自动关闭超时未支付订单 N 笔`，并确认商品库存回滚、订单变成「已取消」。
+本地验证关单：把 `ORDER_PAY_TIMEOUT_MINUTES` 临时设成 `1`，下单后观察订单先进入「关单中」，日志出现
+`超时订单进入关单中 N 笔`；消费者确认支付宝交易已关闭后，订单变成「已取消」且库存只回补一次。
 
 ## 10. 常见问题
 

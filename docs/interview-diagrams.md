@@ -132,7 +132,7 @@ flowchart TD
 - Redis 锁用于削峰和减少竞争，**不能替代数据库事务和唯一约束**。
 - 商品行锁必须在事务中使用，否则事务结束后锁立即释放，无法保护后续更新。
 - 订单事件不直接发 MQ，而是与订单数据同事务写入 outbox，提交后由投递器异步发送，详见第 3 节。
-- 支付、确认成交、完成、取消等状态变更也通过订单行锁串行处理。
+- 支付入账、确认成交和完成等需要读取完整上下文的操作通过订单行锁串行处理；取消与超时关单落终态时额外使用带来源状态的 CAS，防止重复回补库存。
 
 ## 3. 消息可靠投递（事务性 Outbox）
 
@@ -168,8 +168,56 @@ sequenceDiagram
 
 ### 关键边界
 
-- outbox 只保证**至少一次**投递，不保证 exactly once，也不保证严格顺序：重试的事件会被后续事件超过。消费者需要幂等；当前订单、聊天、通知三个消费者只做 WebSocket 广播，重复消费没有副作用，一旦出现落库类消费，必须按 `messageId`（即 outbox 的 `event_id`）去重。
+- outbox 只保证**至少一次**投递，不保证 exactly once，也不保证严格顺序：重试的事件会被后续事件超过。消费者需要幂等；关单消费者通过订单状态 CAS 保证重复消费不会重复取消或回补库存，广播类消费者重复执行也不改变核心业务数据。
 - 消费端的重试和死信队列处理的是**已经进队列**的消息，解决不了“还没进队列”的丢失，两者是互补关系而不是替代关系。
 - 投递器用 `update ... where status = 0` 做 CAS 抢占，多实例同时扫描也不会重复投递；实例在“投递中”宕机会把记录留在该状态，超时后自动放回待投递。
 - 失败超过上限的记录停在 `status = 3`（默认 30 次、最长间隔 5 分钟，约 2 小时重试窗口），需要人工排查原因后重放：`update outbox_event set status = 0, next_attempt_at = now() where id = ?`。
 - 投递依赖 `publisher-confirm-type: correlated`、`publisher-returns: true` 和模板 `mandatory`；缺了确认配置，“发出去”就不等于“broker 收到了”，这个方案会退化成原来的样子。
+
+## 4. 超时关单与支付成功竞态
+
+```mermaid
+sequenceDiagram
+    participant Job as 超时扫描任务
+    participant DB as MySQL
+    participant Outbox as Outbox Relay
+    participant MQ as RabbitMQ
+    participant Close as 关单消费者
+    participant Alipay as 支付宝
+    participant Notify as 支付回调
+
+    Job->>DB: 短事务 CAS 0待确认 → 4关单中
+    Job->>DB: 同事务写 OrderCloseRequestedEvent
+    DB-->>Job: commit
+    Outbox->>MQ: 投递关单命令
+    MQ->>Close: 消费命令
+    Close->>Alipay: alipay.trade.close（事务外）
+
+    alt 支付宝确认已关闭
+        Close->>DB: 短事务 CAS 4关单中 → 2已取消
+        DB->>DB: CAS 成功才回补库存
+    else 支付宝提示交易已支付
+        Close->>Alipay: alipay.trade.query
+        Close->>DB: 支付入账 4关单中 → 1已成交
+    else 网络异常或结果未知
+        Close-->>MQ: 抛异常触发重试 / 死信
+        Note over Job,DB: 定时扫描陈旧的 status=4 并重新投递
+    end
+
+    par 支付回调可能同时到达
+        Notify->>DB: 锁订单并校验金额
+        Notify->>DB: 0或4 → 1已成交
+    end
+```
+
+### 竞态处理的面试表述
+
+> 超时关单不能把支付宝 RPC 放在数据库事务里，否则网络抖动会让订单行锁长时间不释放，支付回调也会被阻塞。我的实现先用一个短事务把订单从待确认 CAS 到关单中，并把关单命令写入 Outbox；事务提交后由 RabbitMQ 消费者在事务外调用支付宝。支付宝确认关闭后，再用第二个短事务执行 `关单中 → 已取消`，只有条件更新影响一行时才恢复库存。如果支付宝提示已经支付，就主动查询并把订单从关单中推进到已成交；如果结果未知，订单保持关单中，由 MQ 重试和定时扫描继续收敛。支付回调也允许 `待确认/关单中 → 已成交`，因此支付与关单谁先完成由数据库状态条件裁决，不会出现重复取消、重复回补库存或长事务包 RPC。
+
+### 关键边界
+
+- `0 → 4` 与 Outbox 事件必须在同一个本地事务中，否则可能出现订单已经进入关单中但命令永久丢失。
+- 支付宝 RPC 必须在事务外执行，数据库行锁无法锁住支付宝侧的支付动作。
+- 最终取消必须是 `update ... where status = 4`；影响行数为 0 表示支付或其他流程已经抢先，绝不能恢复库存。
+- 关单命令是至少一次投递，消费者必须允许重复执行；订单状态 CAS 与支付宝关单接口的幂等语义共同兜底。
+- 已取消后仍收到支付成功通知时不能重新发货，系统使用稳定的退款请求号自动原路退款。

@@ -398,8 +398,13 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
-        if (!Integer.valueOf(PRODUCT_ON_SALE).equals(product.getStatus())) {
-            throw new BizException(ErrorCode.BUSINESS_ERROR, "商品不是上架状态，不能成交");
+        // 库存在下单时已按订单数量扣减，成交只消费这笔"预留"，不能再拿商品当前状态当闸门：
+        // 同一商品有多件库存时，前一笔订单成交会把商品置为"已售出"，后一笔订单的支付不能因此失败。
+        // 仍然拦截"下架/待审核"这类人为或风控动作，它们才代表这笔交易不该继续。
+        boolean stillSellable = Integer.valueOf(PRODUCT_ON_SALE).equals(product.getStatus())
+                || Integer.valueOf(PRODUCT_SOLD).equals(product.getStatus());
+        if (!stillSellable) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "商品已下架或不可售，不能成交");
         }
 
         order.setStatus(ORDER_DEALED);

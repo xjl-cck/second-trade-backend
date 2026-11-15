@@ -64,6 +64,7 @@ public class OrderResponse {
             case 1 -> "已成交";
             case 2 -> "已取消";
             case 3 -> "已完成";
+            case 4 -> "关单中";
             default -> "未知";
         };
     }

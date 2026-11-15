@@ -263,6 +263,41 @@ class TradeOrderServiceImplTest {
         verify(tradeOrderMapper).updateById(order);
     }
 
+    @Test
+    @DisplayName("商品已被前一笔订单置为已售出时，后续订单的支付仍能成交")
+    void paymentStillWorksWhenProductSoldOutByAnotherOrder() {
+        // 库存 2 件：A、B 各下一单，下单时库存已扣到 0 但商品仍是"上架中"；
+        // A 支付后商品被置为"已售出"，B 支付时不能再被这个状态挡住（否则钱收了单不成交）。
+        TradeOrder order = existingOrder(300L, 10L, 1, null);
+        order.setStatus(0);
+        Product product = onSaleProduct(10L);
+        product.setStock(0);
+        product.setStatus(4);
+        when(tradeOrderMapper.selectByOrderNoForUpdate("SH300")).thenReturn(order);
+        when(productMapper.selectByIdForUpdate(10L)).thenReturn(product);
+        when(productMapper.selectById(10L)).thenReturn(product);
+
+        OrderResponse response = tradeOrderService.paySuccess("SH300", new BigDecimal("10.00"));
+
+        assertEquals(1, response.getStatus());
+        verify(tradeOrderMapper).updateById(order);
+    }
+
+    @Test
+    @DisplayName("商品已下架时仍然拒绝成交")
+    void paymentRejectedWhenProductOffShelf() {
+        TradeOrder order = existingOrder(300L, 10L, 1, null);
+        order.setStatus(0);
+        Product product = onSaleProduct(10L);
+        product.setStatus(3);
+        when(tradeOrderMapper.selectByOrderNoForUpdate("SH300")).thenReturn(order);
+        when(productMapper.selectByIdForUpdate(10L)).thenReturn(product);
+
+        assertThrows(BizException.class,
+                () -> tradeOrderService.paySuccess("SH300", new BigDecimal("10.00")));
+        verify(tradeOrderMapper, never()).updateById(any(TradeOrder.class));
+    }
+
     private void stubSuccessfulCreatePath(Long productId) {
         Product product = onSaleProduct(productId);
         when(tradeOrderMapper.selectByBuyerIdAndIdempotencyKey(BUYER_ID, IDEMPOTENCY_KEY)).thenReturn(null);

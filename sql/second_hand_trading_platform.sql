@@ -199,7 +199,7 @@ CREATE TABLE trade_order (
     receiver_phone VARCHAR(20) DEFAULT NULL COMMENT '联系电话快照',
     receiver_address VARCHAR(255) DEFAULT NULL COMMENT '收货地址快照',
     amount DECIMAL(10, 2) NOT NULL COMMENT '成交金额',
-    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待确认 1已成交 2已取消 3已完成',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0待确认 1已成交 2已取消 3已完成 4关单中',
     close_reason VARCHAR(255) DEFAULT NULL COMMENT '取消/关闭原因',
     deal_time DATETIME DEFAULT NULL COMMENT '成交时间',
     finished_time DATETIME DEFAULT NULL COMMENT '完成时间',
@@ -213,6 +213,8 @@ CREATE TABLE trade_order (
     KEY idx_trade_order_seller_id (seller_id),
     KEY idx_trade_order_product_id (product_id),
     KEY idx_trade_order_status (status),
+    KEY idx_trade_order_status_create (status, create_time),
+    KEY idx_trade_order_status_update (status, update_time),
     KEY idx_trade_order_create_time (create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='订单表';
 
