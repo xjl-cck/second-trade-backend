@@ -3,6 +3,7 @@ package org.example.secondhandtradingplatform.product.dto;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -35,5 +36,6 @@ public class ProductUpdateRequest {
     private String location;
 
     @Size(max = 20, message = "不能超过20个字符")
+    @Pattern(regexp = "^$|^1[3-9]\\d{9}$", message = "手机号格式不正确")
     private String contactPhone;
 }

@@ -14,7 +14,7 @@ public interface ProductService {
 
     ProductResponse update(Long productId, ProductUpdateRequest request);
 
-    void putOnSale(Long productId);
+    void submitForReview(Long productId);
 
     void takeOffSale(Long productId);
 

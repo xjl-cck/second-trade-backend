@@ -4,6 +4,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -42,5 +43,11 @@ public class ProductCreateRequest {
     private String location;
 
     @Size(max = 20, message = "不能超过20个字符")
+    @Pattern(regexp = "^$|^1[3-9]\\d{9}$", message = "手机号格式不正确")
     private String contactPhone;
+
+    /**
+     * true 时保存为草稿（status=0），不再要求交易地点；默认 false，提交管理员审核。
+     */
+    private Boolean draft;
 }

@@ -33,7 +33,7 @@ public class ProductController {
     }
 
     @PostMapping
-    @Operation(summary = "发布商品", description = "登录用户发布商品，当前版本发布后直接上架")
+    @Operation(summary = "发布商品", description = "登录用户发布商品；默认提交审核，draft=true 时保存为草稿")
     public Result<ProductResponse> publish(@Valid @RequestBody ProductCreateRequest request) {
         return Result.success(productService.publish(request));
     }
@@ -45,10 +45,10 @@ public class ProductController {
         return Result.success(productService.update(productId, request));
     }
 
-    @PutMapping("/{productId}/on-sale")
-    @Operation(summary = "上架商品", description = "只能上架自己发布且未售出的商品")
-    public Result<Void> putOnSale(@PathVariable Long productId) {
-        productService.putOnSale(productId);
+    @PutMapping("/{productId}/submit")
+    @Operation(summary = "提交审核", description = "草稿或已下架商品提交管理员审核，审核通过后才会上架")
+    public Result<Void> submitForReview(@PathVariable Long productId) {
+        productService.submitForReview(productId);
         return Result.success();
     }
 

@@ -109,16 +109,29 @@ public class AdminServiceImpl implements AdminService {
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
-        if (!List.of(PRODUCT_PENDING, PRODUCT_ON_SALE, PRODUCT_OFF_SALE).contains(product.getStatus())) {
-            throw new BizException(ErrorCode.BUSINESS_ERROR, "当前商品状态不能审核");
+        int currentStatus = product.getStatus() == null ? -1 : product.getStatus();
+        int targetStatus = request.getStatus();
+        boolean reviewing = currentStatus == PRODUCT_PENDING
+                && (targetStatus == PRODUCT_ON_SALE || targetStatus == PRODUCT_OFF_SALE);
+        // 已上架商品允许被管理员直接下架（违规处置），但不能再走“通过/驳回”
+        boolean takingDown = currentStatus == PRODUCT_ON_SALE && targetStatus == PRODUCT_OFF_SALE;
+        if (!reviewing && !takingDown) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR,
+                    currentStatus == PRODUCT_PENDING
+                            ? "当前商品状态不能审核"
+                            : "只有待审核商品可以通过或驳回，上架中的商品只能下架");
         }
-        product.setStatus(request.getStatus());
+        product.setStatus(targetStatus);
         product.setAuditReason(trimToNull(request.getAuditReason()));
-        if (Integer.valueOf(PRODUCT_ON_SALE).equals(request.getStatus()) && product.getPublishedTime() == null) {
+        if (targetStatus == PRODUCT_ON_SALE) {
             product.setPublishedTime(LocalDateTime.now());
         }
         productMapper.updateById(product);
-        productSearchIndex.index(product);
+        if (targetStatus == PRODUCT_ON_SALE) {
+            productSearchIndex.index(product);
+        } else {
+            productSearchIndex.delete(productId);
+        }
         redisCacheService.delete("product:detail:" + productId);
         redisCacheService.deleteByPattern("product:hot:*");
         return buildProductResponse(product, true);

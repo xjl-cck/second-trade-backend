@@ -29,6 +29,7 @@ public class ProductResponse {
     private Integer browseCount;
     private Integer favoriteCount;
     private String contactPhone;
+    private String auditReason;
     private LocalDateTime publishedTime;
     private LocalDateTime createTime;
     private List<ProductImageResponse> images = new ArrayList<>();
@@ -51,6 +52,7 @@ public class ProductResponse {
         response.setBrowseCount(product.getBrowseCount());
         response.setFavoriteCount(product.getFavoriteCount());
         response.setContactPhone(product.getContactPhone());
+        response.setAuditReason(product.getAuditReason());
         response.setPublishedTime(product.getPublishedTime());
         response.setCreateTime(product.getCreateTime());
         return response;

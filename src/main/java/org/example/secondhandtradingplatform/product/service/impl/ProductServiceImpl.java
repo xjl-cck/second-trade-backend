@@ -56,6 +56,9 @@ public class ProductServiceImpl implements ProductService {
     private static final Logger log = LoggerFactory.getLogger(ProductServiceImpl.class);
 
     private static final int STATUS_ENABLED = 1;
+    private static final int ADMIN_ROLE = 1;
+    private static final int PRODUCT_DRAFT = 0;
+    private static final int PRODUCT_PENDING = 1;
     private static final int PRODUCT_ON_SALE = 2;
     private static final int PRODUCT_OFF_SALE = 3;
     private static final int PRODUCT_SOLD = 4;
@@ -110,7 +113,9 @@ public class ProductServiceImpl implements ProductService {
     public ProductResponse publish(ProductCreateRequest request) {
         Long userId = requireLoginUserId();
         validateCategory(request.getCategoryId());
-        validateTradeLocation(defaultInt(request.getDeliveryMethod(), 0), request.getLocation());
+        if (!Boolean.TRUE.equals(request.getDraft())) {
+            validateTradeLocation(defaultInt(request.getDeliveryMethod(), 0), request.getLocation());
+        }
 
         Product product = new Product();
         product.setSellerId(userId);
@@ -124,14 +129,15 @@ public class ProductServiceImpl implements ProductService {
         product.setExchangeType(defaultInt(request.getExchangeType(), 0));
         product.setDeliveryMethod(defaultInt(request.getDeliveryMethod(), 0));
         product.setLocation(trimToNull(request.getLocation()));
-        product.setStatus(PRODUCT_ON_SALE);
+        product.setStatus(Boolean.TRUE.equals(request.getDraft()) ? PRODUCT_DRAFT : PRODUCT_PENDING);
         product.setBrowseCount(0);
         product.setFavoriteCount(0);
         product.setContactPhone(trimToNull(request.getContactPhone()));
-        product.setPublishedTime(LocalDateTime.now());
+        // 发布时间在审核通过时再写，草稿/待审核商品不算已发布
+        product.setPublishedTime(null);
         product.setIsDeleted(0);
         productMapper.insert(product);
-        productSearchIndex.index(product);
+        // 草稿和待审核商品不写搜索索引，避免未过审商品被搜到
         evictHotCache();
         return buildResponse(product, false);
     }
@@ -187,17 +193,21 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void putOnSale(Long productId) {
+    public void submitForReview(Long productId) {
         Product product = getOwnedProduct(productId);
-        if (Integer.valueOf(PRODUCT_SOLD).equals(product.getStatus())) {
-            throw new BizException(ErrorCode.BUSINESS_ERROR, "已售出的商品不能上架");
+        Integer status = product.getStatus();
+        if (Integer.valueOf(PRODUCT_ON_SALE).equals(status)) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "商品已上架，无需重复提交审核");
         }
-        product.setStatus(PRODUCT_ON_SALE);
-        if (product.getPublishedTime() == null) {
-            product.setPublishedTime(LocalDateTime.now());
+        if (Integer.valueOf(PRODUCT_PENDING).equals(status)) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "商品正在审核中，请等待管理员处理");
         }
+        if (Integer.valueOf(PRODUCT_SOLD).equals(status)) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "已售出的商品不能提交审核");
+        }
+        product.setStatus(PRODUCT_PENDING);
+        product.setAuditReason(null);
         productMapper.updateById(product);
-        productSearchIndex.index(product);
         evictDetailCache(productId);
         evictHotCache();
     }
@@ -209,9 +219,12 @@ public class ProductServiceImpl implements ProductService {
         if (Integer.valueOf(PRODUCT_SOLD).equals(product.getStatus())) {
             throw new BizException(ErrorCode.BUSINESS_ERROR, "已售出的商品不能下架");
         }
+        if (Integer.valueOf(PRODUCT_PENDING).equals(product.getStatus())) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR, "审核中的商品不能下架，可等待审核结果");
+        }
         product.setStatus(PRODUCT_OFF_SALE);
         productMapper.updateById(product);
-        productSearchIndex.index(product);
+        productSearchIndex.delete(productId);
         evictDetailCache(productId);
         evictHotCache();
     }
@@ -222,21 +235,23 @@ public class ProductServiceImpl implements ProductService {
         String cacheKey = productDetailCacheKey(productId);
         ProductResponse cached = redisCacheService.get(cacheKey, ProductResponse.class);
         if (cached != null) {
+            ensureViewable(cached.getSellerId(), cached.getStatus());
             recordBrowse(productId);
             cached.setBrowseCount(defaultInt(cached.getBrowseCount(), 0)
                     + (int) redisCacheService.getLong(browseCountKey(productId)));
-            return cached;
+            return maskContact(cached);
         }
         Product product = productMapper.selectById(productId);
         if (product == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
         }
+        ensureViewable(product.getSellerId(), product.getStatus());
         ProductResponse response = buildResponse(product, true);
         redisCacheService.set(cacheKey, response, cacheTtl);
         recordBrowse(productId);
         response.setBrowseCount(defaultInt(product.getBrowseCount(), 0)
                 + (int) redisCacheService.getLong(browseCountKey(productId)));
-        return response;
+        return maskContact(response);
     }
 
     @Override
@@ -251,19 +266,22 @@ public class ProductServiceImpl implements ProductService {
                 if (cached.isLogicalExpired()) {
                     rebuildHotCacheAsync(request, pageNo, pageSize, hotCacheKey);
                 }
-                return cached.toPage();
+                return maskContacts(cached.toPage());
             }
         }
         Page<ProductResponse> responsePage = loadPageFromDatabase(request, pageNo, pageSize);
         if (hotSort) {
             cacheHotPage(hotCacheKey, responsePage);
         }
-        return responsePage;
+        return maskContacts(responsePage);
     }
 
     private Page<ProductResponse> loadPageFromDatabase(ProductQueryRequest request, int pageNo, int pageSize) {
         Integer status = request.getStatus();
-        if (status == null && request.getSellerId() == null) {
+        if (UserContext.getUserId() == null) {
+            // 匿名访客只能看到上架商品，忽略调用方传入的 status，避免 ?status=1 直接翻到待审核商品
+            status = PRODUCT_ON_SALE;
+        } else if (status == null && request.getSellerId() == null) {
             status = PRODUCT_ON_SALE;
         }
         List<Long> searchIds = productSearchIndex.search(request.getKeyword());
@@ -406,6 +424,45 @@ public class ProductServiceImpl implements ProductService {
         if (!Integer.valueOf(DELIVERY_BY_SELLER).equals(deliveryMethod) && !StringUtils.hasText(location)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "线下自提和当面交易需要填写交易地点");
         }
+    }
+
+    /**
+     * 草稿和待审核商品只有卖家本人和管理员能查看，其他人即使拿到 ID 也按“不存在”处理。
+     */
+    private void ensureViewable(Long sellerId, Integer status) {
+        boolean hidden = Integer.valueOf(PRODUCT_DRAFT).equals(status)
+                || Integer.valueOf(PRODUCT_PENDING).equals(status);
+        if (!hidden) {
+            return;
+        }
+        Long viewerId = UserContext.getUserId();
+        if (viewerId == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "商品不存在或尚未上架");
+        }
+        if (viewerId.equals(sellerId)) {
+            return;
+        }
+        SysUser viewer = sysUserMapper.selectById(viewerId);
+        if (viewer == null || !Integer.valueOf(ADMIN_ROLE).equals(viewer.getRole())) {
+            throw new BizException(ErrorCode.NOT_FOUND, "商品不存在或尚未上架");
+        }
+    }
+
+    /**
+     * 联系方式只对登录用户可见，未登录访客一律抹掉。
+     */
+    private ProductResponse maskContact(ProductResponse response) {
+        if (response != null && UserContext.getUserId() == null) {
+            response.setContactPhone(null);
+        }
+        return response;
+    }
+
+    private Page<ProductResponse> maskContacts(Page<ProductResponse> page) {
+        if (page != null && UserContext.getUserId() == null) {
+            page.getRecords().forEach(item -> item.setContactPhone(null));
+        }
+        return page;
     }
 
     private List<Long> resolveCategoryIds(Long categoryId) {
