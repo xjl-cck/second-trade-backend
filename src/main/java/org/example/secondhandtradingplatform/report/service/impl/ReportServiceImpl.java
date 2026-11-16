@@ -16,6 +16,7 @@ import org.example.secondhandtradingplatform.report.dto.ReportResponse;
 import org.example.secondhandtradingplatform.report.entity.Report;
 import org.example.secondhandtradingplatform.report.mapper.ReportMapper;
 import org.example.secondhandtradingplatform.report.service.ReportService;
+import org.example.secondhandtradingplatform.security.AccountStatusChecker;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
@@ -37,15 +38,18 @@ public class ReportServiceImpl implements ReportService {
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
     private final ChatMessageMapper chatMessageMapper;
+    private final AccountStatusChecker accountStatusChecker;
 
     public ReportServiceImpl(ReportMapper reportMapper,
                              ProductMapper productMapper,
                              SysUserMapper sysUserMapper,
-                             ChatMessageMapper chatMessageMapper) {
+                             ChatMessageMapper chatMessageMapper,
+                             AccountStatusChecker accountStatusChecker) {
         this.reportMapper = reportMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
         this.chatMessageMapper = chatMessageMapper;
+        this.accountStatusChecker = accountStatusChecker;
     }
 
     @Override
@@ -181,8 +185,8 @@ public class ReportServiceImpl implements ReportService {
 
     private Long requireAdmin() {
         Long userId = requireLoginUserId();
-        SysUser user = sysUserMapper.selectById(userId);
-        if (user == null || !Integer.valueOf(ADMIN_ROLE).equals(user.getRole())) {
+        SysUser user = accountStatusChecker.requireActive(userId);
+        if (!Integer.valueOf(ADMIN_ROLE).equals(user.getRole())) {
             throw new BizException(ErrorCode.FORBIDDEN, "仅管理员可以处理举报");
         }
         return userId;

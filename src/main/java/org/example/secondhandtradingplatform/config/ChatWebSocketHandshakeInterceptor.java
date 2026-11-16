@@ -1,5 +1,6 @@
 package org.example.secondhandtradingplatform.config;
 
+import org.example.secondhandtradingplatform.security.AccountStatusChecker;
 import org.example.secondhandtradingplatform.security.JwtUtil;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -15,9 +16,11 @@ import java.util.Map;
 public class ChatWebSocketHandshakeInterceptor implements HandshakeInterceptor {
 
     private final JwtUtil jwtUtil;
+    private final AccountStatusChecker accountStatusChecker;
 
-    public ChatWebSocketHandshakeInterceptor(JwtUtil jwtUtil) {
+    public ChatWebSocketHandshakeInterceptor(JwtUtil jwtUtil, AccountStatusChecker accountStatusChecker) {
         this.jwtUtil = jwtUtil;
+        this.accountStatusChecker = accountStatusChecker;
     }
 
     @Override
@@ -39,7 +42,9 @@ public class ChatWebSocketHandshakeInterceptor implements HandshakeInterceptor {
             token = token.substring("Bearer ".length());
         }
         try {
-            attributes.put("userId", jwtUtil.parseUserId(token));
+            Long userId = jwtUtil.parseUserId(token);
+            accountStatusChecker.requireActive(userId);
+            attributes.put("userId", userId);
             return true;
         } catch (RuntimeException exception) {
             return false;

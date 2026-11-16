@@ -107,6 +107,9 @@
 3. **WebSocket 推送**：客户端通过 `/ws/chat` 建立实时连接，不需要频繁轮询即可接收新消息。
 4. **JWT 握手认证**：WebSocket 建立连接时校验 Token，防止未登录用户订阅他人的聊天消息。
 5. **RabbitMQ 解耦**：聊天事件通过消息队列异步分发，降低消息持久化和实时推送之间的耦合。
+6. **断线补发**：连接建立或重连后补发未读消息，单次超过上限时返回 `truncated=true`，更早记录由历史消息接口分页获取。
+7. **心跳保活**：服务端定时发送 WebSocket Ping，收到 Pong 后刷新 Redis 中的连接活跃时间，写失败则主动清理僵尸连接。
+8. **多端在线状态**：Redis ZSet 按用户保存多个连接及最后活跃时间，任一连接仍在 TTL 内即视为在线。
 
 ### ⭐ 收货地址模块功能介绍
 
@@ -200,7 +203,7 @@ CREATE DATABASE trading
 mysql -u root -p trading < sql/second_hand_trading_platform.sql
 ```
 
-> `src/main/resources/schema.sql` 会在应用启动时补建支付、退款、退货和 Outbox 相关表，但首次部署仍建议执行完整 SQL 文件。
+> `src/main/resources/schema.sql` 会在应用启动时补建支付、退款、退货和 Outbox 相关表，但首次部署仍建议执行完整 SQL 文件。升级已有数据库时还应按顺序检查 `sql/migration/`，其中 V12 为超时关单扫描增加 `(status, create_time)` 与 `(status, update_time)` 复合索引。
 
 ### 2. 配置环境变量
 
@@ -218,6 +221,8 @@ $env:OSS_ENABLED = "false"
 $env:CANAL_ENABLED = "false"
 $env:ALIPAY_ENABLED = "false"
 ```
+
+聊天可靠性参数可按部署环境调整：`CHAT_REPLAY_MAX_MESSAGES` 默认 100、`CHAT_PRESENCE_TTL_SECONDS` 默认 90、`CHAT_HEARTBEAT_INTERVAL_MS` 默认 30000。心跳间隔应明显小于在线状态 TTL。
 
 也可以在 IDEA 的 **Run/Debug Configurations → Environment variables** 中填写这些变量。
 
@@ -308,7 +313,7 @@ flowchart LR
     C --> E
     A --> B[Outbox Relay]
     B --> X
-    X --> N[订单 / 聊天 / 系统通知消费者]
+    X --> N[订单通知 / 关单命令 / 聊天 / 系统通知消费者]
 ```
 
 ## ☀️ 核心设计
@@ -352,7 +357,9 @@ sequenceDiagram
 
 - REST API 负责创建会话、拉取历史消息和更新已读状态。
 - WebSocket `/ws/chat` 负责实时推送，握手时读取并校验 JWT。
-- RabbitMQ 用于聊天消息异步分发，Redis 维护在线状态相关数据。
+- RabbitMQ 用于聊天消息异步分发；重连后按用户补发未读消息，前端按消息 ID 去重。
+- 服务端每 30 秒发送 Ping，浏览器自动回复 Pong；Redis ZSet 记录每条连接的最后活跃时间并按 90 秒 TTL 判断在线状态。
+- 同一用户允许多设备或多标签页同时在线，关闭一条连接不会误把其他连接标记为离线。
 
 ## ☀️ 数据库表设计
 
@@ -386,7 +393,7 @@ sequenceDiagram
 | 分类 | `/api/categories` | 分类树查询 |
 | 收藏 | `/api/favorites` | 收藏、取消收藏、收藏列表 |
 | 地址 | `/api/addresses` | 地址增删改查、默认地址 |
-| 订单 | `/api/orders` | 下单、支付、确认、完成、取消、退货 |
+| 订单 | `/api/orders` | 下单、确认、完成、取消、退货与状态查询 |
 | 支付宝 | `/api/payments/alipay` | 支付、回调、状态查询、退款查询 |
 | 聊天 | `/api/chat` | 会话、历史消息、已读状态 |
 | 评价 | `/api/reviews` | 评价、追评、商品评价列表 |
@@ -424,12 +431,14 @@ second-handTradingPlatform/
 │  ├─ system/                     # 系统通知
 │  └─ user/                       # 用户账号
 ├─ src/main/resources/            # 配置与补充建表脚本
-├─ src/test/                      # 订单、Outbox、搜索同步测试
+├─ src/test/                      # 订单、支付、Outbox、聊天心跳、在线状态和搜索同步测试
 ├─ env.example                    # 环境变量示例
 └─ pom.xml                        # Maven 依赖
 ```
 
 ## ☀️ 测试与构建
+
+当前后端共有 **56 个测试**，覆盖订单幂等、支付/关单竞态、库存回补、Outbox 投递、聊天心跳与在线状态、未读消息补发、Canal 解析和搜索索引补偿。
 
 ```shell
 mvn test

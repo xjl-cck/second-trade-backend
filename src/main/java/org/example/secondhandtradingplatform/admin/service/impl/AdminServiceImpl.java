@@ -28,6 +28,7 @@ import org.example.secondhandtradingplatform.product.entity.ProductImage;
 import org.example.secondhandtradingplatform.product.mapper.ProductImageMapper;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
 import org.example.secondhandtradingplatform.product.service.impl.ProductSearchIndex;
+import org.example.secondhandtradingplatform.security.AccountStatusChecker;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.dto.UserProfileResponse;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
@@ -58,6 +59,7 @@ public class AdminServiceImpl implements AdminService {
     private final TradeOrderMapper tradeOrderMapper;
     private final RedisCacheService redisCacheService;
     private final ProductSearchIndex productSearchIndex;
+    private final AccountStatusChecker accountStatusChecker;
 
     public AdminServiceImpl(ProductMapper productMapper,
                             ProductImageMapper productImageMapper,
@@ -65,7 +67,8 @@ public class AdminServiceImpl implements AdminService {
                             CategoryMapper categoryMapper,
                             TradeOrderMapper tradeOrderMapper,
                             RedisCacheService redisCacheService,
-                            ProductSearchIndex productSearchIndex) {
+                            ProductSearchIndex productSearchIndex,
+                            AccountStatusChecker accountStatusChecker) {
         this.productMapper = productMapper;
         this.productImageMapper = productImageMapper;
         this.sysUserMapper = sysUserMapper;
@@ -73,6 +76,7 @@ public class AdminServiceImpl implements AdminService {
         this.tradeOrderMapper = tradeOrderMapper;
         this.redisCacheService = redisCacheService;
         this.productSearchIndex = productSearchIndex;
+        this.accountStatusChecker = accountStatusChecker;
     }
 
     @Override
@@ -374,8 +378,8 @@ public class AdminServiceImpl implements AdminService {
         if (userId == null) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
-        SysUser user = sysUserMapper.selectById(userId);
-        if (user == null || !Integer.valueOf(ADMIN_ROLE).equals(user.getRole())) {
+        SysUser user = accountStatusChecker.requireActive(userId);
+        if (!Integer.valueOf(ADMIN_ROLE).equals(user.getRole())) {
             throw new BizException(ErrorCode.FORBIDDEN, "仅管理员可以操作");
         }
         return userId;

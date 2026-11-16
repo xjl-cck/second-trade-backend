@@ -11,8 +11,12 @@
 | `payment/config/AlipayClientConfig.java` | 仅当 `alipay.enabled=true` 时创建 `AlipayClient`，本地无密钥也能正常启动 |
 | `payment/entity/PaymentRecord.java` | 支付流水（`payment_record` 表） |
 | `payment/service/impl/AlipayPaymentServiceImpl.java` | 下单、验签、异步通知处理、主动查询、幂等入账 |
-| `payment/controller/AlipayPaymentController.java` | 4 个对外的 HTTP 接口 |
+| `payment/service/impl/AlipayTradeCloseServiceImpl.java` | 调用支付宝关单并区分 `CLOSED / PAID / UNKNOWN` |
+| `order/message/OrderCloseConsumer.java` | 事务外调用支付宝，按结果完成取消、同步支付或触发重试 |
+| `order/message/OrderClosePublisher.java` | 把关单命令与订单状态变更同事务写入 Outbox |
+| `payment/controller/AlipayPaymentController.java` | 5 个对外的 HTTP 接口 |
 | `sql/migration/V9__alipay_payment.sql` | 支付流水表 DDL |
+| `sql/migration/V12__trade_order_status_scan_index.sql` | 超时订单与关单中订单扫描复合索引 |
 
 ## 2. 接口
 
@@ -22,6 +26,7 @@
 | POST | `/api/payments/alipay/notify` | 无 | 支付宝异步通知，验签后处理，返回 `success` / `failure` |
 | GET | `/api/payments/alipay/return` | 无 | 用户付款后浏览器跳回，主动查询一次作为兜底 |
 | GET | `/api/payments/alipay/status/{orderNo}` | 买家/卖家 JWT | 前端轮询，会主动向支付宝查询并同步本地状态 |
+| GET | `/api/payments/alipay/refund/{returnRequestId}` | 订单相关用户 JWT | 查询退款结果并同步本地退款流水 |
 
 `/notify` 和 `/return` 已在 `WebConfig` 里排除 JWT 拦截器。
 
@@ -157,7 +162,7 @@ POST /api/return-requests/{id}/complete
 
 ## 9. 后台补偿任务
 
-两个定时任务，风格与 `OutboxRelay` / `FavoriteFlushJob` 一致，都可配置开关与间隔。
+关单补偿与退款对账任务的风格和 `OutboxRelay` / `FavoriteFlushJob` 一致，均可配置开关、间隔和批量大小。
 
 ### 9.1 超时未支付自动关单 `OrderTimeoutCloseJob`
 
@@ -195,6 +200,8 @@ POST /api/return-requests/{id}/complete
 | `ORDER_AUTO_CLOSE_INTERVAL_MS` | 60000 | 扫描间隔 |
 | `ORDER_AUTO_CLOSE_BATCH_SIZE` | 50 | 单轮批量 |
 | `ORDER_CLOSING_RETRY_MINUTES` | 5 | 关单中订单超过多久重新投递 |
+| `RABBITMQ_ORDER_CLOSE_QUEUE` | order.close.commands | 关单命令队列 |
+| `RABBITMQ_ORDER_CLOSE_ROUTING_KEY` | order.close.requested | 关单命令路由键 |
 | `REFUND_RECONCILE_ENABLED` | true | 对账开关 |
 | `REFUND_RECONCILE_INTERVAL_MS` | 300000 | 对账间隔 |
 | `REFUND_RECONCILE_BATCH_SIZE` | 50 | 单轮批量 |

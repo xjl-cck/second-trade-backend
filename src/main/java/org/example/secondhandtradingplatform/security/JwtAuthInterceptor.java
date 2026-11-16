@@ -14,9 +14,11 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtUtil jwtUtil;
+    private final AccountStatusChecker accountStatusChecker;
 
-    public JwtAuthInterceptor(JwtUtil jwtUtil) {
+    public JwtAuthInterceptor(JwtUtil jwtUtil, AccountStatusChecker accountStatusChecker) {
         this.jwtUtil = jwtUtil;
+        this.accountStatusChecker = accountStatusChecker;
     }
 
     @Override
@@ -35,7 +37,10 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         if (token.startsWith(BEARER_PREFIX)) {
             token = token.substring(BEARER_PREFIX.length());
         }
-        UserContext.setUserId(jwtUtil.parseUserId(token));
+        Long userId = jwtUtil.parseUserId(token);
+        // 先校验账号状态，再写入上下文：被禁用/封禁的账号立即失效，不依赖 Token 过期
+        accountStatusChecker.requireActive(userId);
+        UserContext.setUserId(userId);
         return true;
     }
 
