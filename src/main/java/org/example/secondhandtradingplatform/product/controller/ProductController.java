@@ -7,11 +7,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.example.secondhandtradingplatform.common.Result;
 import org.example.secondhandtradingplatform.product.dto.ProductCreateRequest;
+import org.example.secondhandtradingplatform.product.dto.ProductImageOrderRequest;
 import org.example.secondhandtradingplatform.product.dto.ProductImageResponse;
 import org.example.secondhandtradingplatform.product.dto.ProductQueryRequest;
 import org.example.secondhandtradingplatform.product.dto.ProductResponse;
 import org.example.secondhandtradingplatform.product.dto.ProductUpdateRequest;
 import org.example.secondhandtradingplatform.product.service.ProductService;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -66,6 +68,27 @@ public class ProductController {
                                                     @RequestParam(required = false) Boolean cover,
                                                     @RequestParam(required = false) Integer sort) {
         return Result.success(productService.uploadImage(productId, file, cover, sort));
+    }
+
+    @PutMapping("/{productId}/images/order")
+    @Operation(summary = "调整图片顺序", description = "按传入的 ID 顺序重排商品图片，ID 必须覆盖该商品全部图片")
+    public Result<Void> reorderImages(@PathVariable Long productId,
+                                      @Valid @RequestBody ProductImageOrderRequest request) {
+        productService.reorderImages(productId, request.getImageIds());
+        return Result.success();
+    }
+
+    @PutMapping("/{productId}/images/{imageId}/cover")
+    @Operation(summary = "设置封面", description = "把指定图片设为商品封面，其余图片自动取消封面")
+    public Result<ProductImageResponse> setCover(@PathVariable Long productId, @PathVariable Long imageId) {
+        return Result.success(productService.setCover(productId, imageId));
+    }
+
+    @DeleteMapping("/{productId}/images/{imageId}")
+    @Operation(summary = "删除图片", description = "删除自己的商品图片，若删的是封面会自动顺延下一张")
+    public Result<Void> deleteImage(@PathVariable Long productId, @PathVariable Long imageId) {
+        productService.deleteImage(productId, imageId);
+        return Result.success();
     }
 
     @GetMapping("/{productId}")

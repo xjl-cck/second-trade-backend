@@ -63,6 +63,35 @@ public class OssStorageService {
         return endpoint + "/" + bucket + "/" + key;
     }
 
+    /**
+     * 尽力删除已上传的对象；URL 解析不出来时静默跳过，不影响业务事务。
+     */
+    public void deleteByUrl(String url) {
+        String key = resolveKey(url);
+        if (!StringUtils.hasText(key)) {
+            return;
+        }
+        try {
+            client.deleteObject(bucket, key);
+        } catch (RuntimeException exception) {
+            log.warn("Delete OSS object failed. bucket={}, key={}", bucket, key, exception);
+        }
+    }
+
+    private String resolveKey(String url) {
+        if (!StringUtils.hasText(url)) {
+            return null;
+        }
+        if (StringUtils.hasText(publicDomain) && url.startsWith(publicDomain + "/")) {
+            return url.substring(publicDomain.length() + 1);
+        }
+        String prefix = endpoint + "/" + bucket + "/";
+        if (url.startsWith(prefix)) {
+            return url.substring(prefix.length());
+        }
+        return null;
+    }
+
     private static String trimTrailingSlash(String value) {
         return value == null ? "" : value.replaceAll("/+$", "");
     }

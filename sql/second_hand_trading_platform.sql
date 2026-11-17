@@ -108,10 +108,14 @@ CREATE TABLE product_image (
     url VARCHAR(255) NOT NULL COMMENT '图片地址',
     is_cover TINYINT NOT NULL DEFAULT 0 COMMENT '是否封面 0否 1是',
     sort INT NOT NULL DEFAULT 0 COMMENT '排序值',
+    cover_product_id BIGINT UNSIGNED GENERATED ALWAYS AS (
+        IF(is_cover = 1, product_id, NULL)
+    ) STORED COMMENT '封面归属商品ID：仅封面行有值，配合唯一索引保证每商品最多一张封面',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     is_deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除 0否 1是',
     PRIMARY KEY (id),
+    UNIQUE KEY uk_product_image_cover (cover_product_id),
     KEY idx_product_image_product_id (product_id),
     KEY idx_product_image_sort (sort)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='商品图片表';

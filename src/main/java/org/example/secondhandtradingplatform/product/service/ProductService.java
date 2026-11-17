@@ -8,6 +8,8 @@ import org.example.secondhandtradingplatform.product.dto.ProductResponse;
 import org.example.secondhandtradingplatform.product.dto.ProductUpdateRequest;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 public interface ProductService {
 
     ProductResponse publish(ProductCreateRequest request);
@@ -23,4 +25,10 @@ public interface ProductService {
     Page<ProductResponse> page(ProductQueryRequest request);
 
     ProductImageResponse uploadImage(Long productId, MultipartFile file, Boolean cover, Integer sort);
+
+    ProductImageResponse setCover(Long productId, Long imageId);
+
+    void reorderImages(Long productId, List<Long> imageIds);
+
+    void deleteImage(Long productId, Long imageId);
 }

@@ -87,6 +87,9 @@ app:
   search:
     elasticsearch:
       index: ${ELASTICSEARCH_PRODUCT_INDEX:products}
+    # 关键词召回上限：ES 的 max_result_window 默认就是 10000，超过会报错；
+    # 命中数超过该值时不再用 ES 的这批 ID 分页（会丢结果），自动退回数据库模糊匹配
+    max-recall: ${SEARCH_MAX_RECALL:10000}
     sync:
       # 业务侧写完库已经会立即写一次 ES，这里只是定时按 update_time 窗口兜底重放
       enabled: ${SEARCH_SYNC_ENABLED:true}

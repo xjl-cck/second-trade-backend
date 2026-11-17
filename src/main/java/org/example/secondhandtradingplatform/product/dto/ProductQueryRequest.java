@@ -1,5 +1,6 @@
 package org.example.secondhandtradingplatform.product.dto;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.Data;
 
@@ -23,5 +24,6 @@ public class ProductQueryRequest {
     private Integer pageNo = 1;
 
     @Min(value = 1, message = "不能小于1")
+    @Max(value = 50, message = "不能大于50")
     private Integer pageSize = 10;
 }

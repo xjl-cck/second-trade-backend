@@ -41,8 +41,8 @@ import java.time.Duration;
 import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
 import java.util.List;
-import java.util.Locale;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -256,46 +256,60 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public Page<ProductResponse> page(ProductQueryRequest request) {
+        if (request.getMinPrice() != null && request.getMaxPrice() != null
+                && request.getMinPrice().compareTo(request.getMaxPrice()) > 0) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "最低价格不能高于最高价格");
+        }
         int pageNo = normalizePageNo(request.getPageNo());
         int pageSize = normalizePageSize(request.getPageSize());
+        // 先做权限判定并确定实际状态，再走缓存：否则管理员/卖家缓存过的待审核页可能被匿名请求命中
+        Integer status = resolveQueryStatus(request);
         boolean hotSort = "hot".equalsIgnoreCase(request.getSortType());
-        String hotCacheKey = hotSort ? hotCacheKey(request, pageNo, pageSize) : null;
+        String hotCacheKey = hotSort ? hotCacheKey(request, status, pageNo, pageSize) : null;
         if (hotSort) {
             ProductPageCache cached = redisCacheService.get(hotCacheKey, ProductPageCache.class);
             if (cached != null) {
                 if (cached.isLogicalExpired()) {
-                    rebuildHotCacheAsync(request, pageNo, pageSize, hotCacheKey);
+                    rebuildHotCacheAsync(request, status, pageNo, pageSize, hotCacheKey);
                 }
                 return maskContacts(cached.toPage());
             }
         }
-        Page<ProductResponse> responsePage = loadPageFromDatabase(request, pageNo, pageSize);
+        Page<ProductResponse> responsePage = loadPageFromDatabase(request, status, pageNo, pageSize);
         if (hotSort) {
             cacheHotPage(hotCacheKey, responsePage);
         }
         return maskContacts(responsePage);
     }
 
-    private Page<ProductResponse> loadPageFromDatabase(ProductQueryRequest request, int pageNo, int pageSize) {
-        Integer status = request.getStatus();
-        if (UserContext.getUserId() == null) {
-            // 匿名访客只能看到上架商品，忽略调用方传入的 status，避免 ?status=1 直接翻到待审核商品
-            status = PRODUCT_ON_SALE;
-        } else if (status == null && request.getSellerId() == null) {
-            status = PRODUCT_ON_SALE;
-        }
-        List<Long> searchIds = productSearchIndex.search(request.getKeyword());
-        if (searchIds != null && searchIds.isEmpty()) {
-            return emptyPage(pageNo, pageSize);
+    private Page<ProductResponse> loadPageFromDatabase(ProductQueryRequest request, Integer status, int pageNo, int pageSize) {
+        ProductSearchIndex.SearchResult searchResult = productSearchIndex.search(request.getKeyword());
+        List<Long> searchIds = null;
+        if (searchResult != null) {
+            if (searchResult.ids().isEmpty()) {
+                return emptyPage(pageNo, pageSize);
+            }
+            if (searchResult.truncated()) {
+                // 召回被上限截断时，只拿这批 ID 分页会丢结果，退回数据库模糊匹配保证完整
+                log.warn("Keyword recall truncated: total={}, returned={}, fallback to database LIKE",
+                        searchResult.total(), searchResult.ids().size());
+            } else {
+                searchIds = searchResult.ids();
+            }
         }
         LambdaQueryWrapper<Product> query = Wrappers.lambdaQuery(Product.class)
                 .eq(request.getSellerId() != null, Product::getSellerId, request.getSellerId())
-                .eq(status != null, Product::getStatus, status)
-                .like(searchIds == null && StringUtils.hasText(request.getKeyword()),
-                        Product::getTitle, trimToNull(request.getKeyword()));
+                .eq(status != null, Product::getStatus, status);
 
         if (searchIds != null) {
             query.in(Product::getId, searchIds);
+        } else if (StringUtils.hasText(request.getKeyword())) {
+            // 与 ES 的字段保持一致：标题、描述、交易地点
+            String keyword = trimToNull(request.getKeyword());
+            query.and(wrapper -> wrapper
+                    .like(Product::getTitle, keyword)
+                    .or().like(Product::getDescription, keyword)
+                    .or().like(Product::getLocation, keyword));
         }
 
         if (request.getCategoryId() != null) {
@@ -333,6 +347,42 @@ public class ProductServiceImpl implements ProductService {
         return responsePage;
     }
 
+    /**
+     * 状态过滤的可见性规则：
+     * <ul>
+     *     <li>查询自己发布的商品（sellerId = 当前用户）或管理员：可按任意状态查询，不传 status 表示全部；</li>
+     *     <li>其他人：不传 status 只看上架商品，显式传状态时只允许“上架 / 已售出”，
+     *         查草稿、待审核、已下架一律拒绝，避免翻出别人未公开的商品。</li>
+     * </ul>
+     */
+    private Integer resolveQueryStatus(ProductQueryRequest request) {
+        Integer requested = request.getStatus();
+        Long requesterId = UserContext.getUserId();
+        if (requesterId != null && requesterId.equals(request.getSellerId())) {
+            // 查自己：status 为空表示全部（我的商品列表）
+            return requested;
+        }
+        if (requested == null) {
+            return PRODUCT_ON_SALE;
+        }
+        if (Integer.valueOf(PRODUCT_ON_SALE).equals(requested) || Integer.valueOf(PRODUCT_SOLD).equals(requested)) {
+            return requested;
+        }
+        // 只有管理员可以按草稿/待审核/已下架做全站筛选
+        if (isAdmin(requesterId)) {
+            return requested;
+        }
+        throw new BizException(ErrorCode.FORBIDDEN, "只能查询自己发布的商品状态");
+    }
+
+    private boolean isAdmin(Long requesterId) {
+        if (requesterId == null) {
+            return false;
+        }
+        SysUser viewer = sysUserMapper.selectById(requesterId);
+        return viewer != null && Integer.valueOf(ADMIN_ROLE).equals(viewer.getRole());
+    }
+
     private void cacheHotPage(String hotCacheKey, Page<ProductResponse> responsePage) {
         ProductPageCache cache = ProductPageCache.from(
                 responsePage,
@@ -341,7 +391,8 @@ public class ProductServiceImpl implements ProductService {
         redisCacheService.set(hotCacheKey, cache, hotCachePhysicalTtl);
     }
 
-    private void rebuildHotCacheAsync(ProductQueryRequest request, int pageNo, int pageSize, String hotCacheKey) {
+    private void rebuildHotCacheAsync(ProductQueryRequest request, Integer status, int pageNo, int pageSize,
+                                      String hotCacheKey) {
         String lockKey = hotCacheKey + ":rebuild";
         String lockToken = redisCacheService.tryLock(lockKey, Duration.ofSeconds(30));
         if (lockToken == null) {
@@ -350,7 +401,7 @@ public class ProductServiceImpl implements ProductService {
         try {
             applicationTaskExecutor.execute(() -> {
                 try {
-                    cacheHotPage(hotCacheKey, loadPageFromDatabase(request, pageNo, pageSize));
+                    cacheHotPage(hotCacheKey, loadPageFromDatabase(request, status, pageNo, pageSize));
                 } catch (RuntimeException exception) {
                     log.warn("Async hot product cache rebuild failed, key={}", hotCacheKey, exception);
                 } finally {
@@ -366,16 +417,18 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ProductImageResponse uploadImage(Long productId, MultipartFile file, Boolean cover, Integer sort) {
-        Product product = getOwnedProduct(productId);
-        if (file == null || file.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "图片不能为空");
+        // 锁住商品行，串行化同一商品的图片写入，避免并发上传出现两张封面
+        Product product = getOwnedProductForUpdate(productId);
+        Long imageCount = productImageMapper.selectCount(Wrappers.<ProductImage>lambdaQuery()
+                .eq(ProductImage::getProductId, productId));
+        if (imageCount != null && imageCount >= ImageFileRules.MAX_IMAGES_PER_PRODUCT) {
+            throw new BizException(ErrorCode.BUSINESS_ERROR,
+                    "每个商品最多上传 " + ImageFileRules.MAX_IMAGES_PER_PRODUCT + " 张图片");
         }
         String url = saveFile(file);
         boolean coverImage = Boolean.TRUE.equals(cover) || !StringUtils.hasText(product.getCoverImage());
         if (coverImage) {
-            productImageMapper.update(null, Wrappers.<ProductImage>lambdaUpdate()
-                    .set(ProductImage::getIsCover, NO)
-                    .eq(ProductImage::getProductId, productId));
+            clearCoverFlag(productId);
         }
         ProductImage image = new ProductImage();
         image.setProductId(productId);
@@ -385,12 +438,136 @@ public class ProductServiceImpl implements ProductService {
         image.setIsDeleted(0);
         productImageMapper.insert(image);
         if (coverImage) {
-            product.setCoverImage(url);
-            productMapper.updateById(product);
+            updateProductCover(productId, url);
         }
         evictDetailCache(productId);
         evictHotCache();
         return ProductImageResponse.from(image);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ProductImageResponse setCover(Long productId, Long imageId) {
+        getOwnedProductForUpdate(productId);
+        ProductImage image = getProductImage(productId, imageId);
+        clearCoverFlag(productId);
+        image.setIsCover(YES);
+        productImageMapper.updateById(image);
+        updateProductCover(productId, image.getUrl());
+        evictDetailCache(productId);
+        evictHotCache();
+        return ProductImageResponse.from(image);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void reorderImages(Long productId, List<Long> imageIds) {
+        getOwnedProductForUpdate(productId);
+        List<ProductImage> images = productImageMapper.selectList(Wrappers.<ProductImage>lambdaQuery()
+                .eq(ProductImage::getProductId, productId));
+        if (imageIds == null || imageIds.isEmpty() || imageIds.size() != images.size()
+                || new HashSet<>(imageIds).size() != imageIds.size()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "图片顺序必须覆盖该商品的全部图片");
+        }
+        Map<Long, ProductImage> imageMap = images.stream()
+                .collect(Collectors.toMap(ProductImage::getId, Function.identity()));
+        if (!imageMap.keySet().equals(new HashSet<>(imageIds))) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "图片顺序中包含不属于该商品的图片");
+        }
+        int sort = 0;
+        for (Long imageId : imageIds) {
+            ProductImage image = imageMap.get(imageId);
+            image.setSort(sort++);
+            productImageMapper.updateById(image);
+        }
+        evictDetailCache(productId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteImage(Long productId, Long imageId) {
+        getOwnedProductForUpdate(productId);
+        ProductImage image = getProductImage(productId, imageId);
+        boolean wasCover = Integer.valueOf(YES).equals(image.getIsCover());
+        // 先清掉封面标记再逻辑删除，否则已删除的行仍会占住“每商品唯一封面”的位置
+        if (wasCover) {
+            image.setIsCover(NO);
+            productImageMapper.updateById(image);
+        }
+        productImageMapper.deleteById(imageId);
+        if (wasCover) {
+            ProductImage next = productImageMapper.selectList(Wrappers.<ProductImage>lambdaQuery()
+                            .eq(ProductImage::getProductId, productId)
+                            .orderByAsc(ProductImage::getSort)
+                            .orderByAsc(ProductImage::getId))
+                    .stream()
+                    .findFirst()
+                    .orElse(null);
+            if (next != null) {
+                next.setIsCover(YES);
+                productImageMapper.updateById(next);
+                updateProductCover(productId, next.getUrl());
+            } else {
+                updateProductCover(productId, null);
+            }
+        }
+        removeStoredFile(image.getUrl());
+        evictDetailCache(productId);
+        evictHotCache();
+    }
+
+    private ProductImage getProductImage(Long productId, Long imageId) {
+        ProductImage image = productImageMapper.selectById(imageId);
+        if (image == null || !productId.equals(image.getProductId())) {
+            throw new BizException(ErrorCode.NOT_FOUND, "图片不存在");
+        }
+        return image;
+    }
+
+    private void clearCoverFlag(Long productId) {
+        productImageMapper.update(null, Wrappers.<ProductImage>lambdaUpdate()
+                .set(ProductImage::getIsCover, NO)
+                .eq(ProductImage::getProductId, productId)
+                .eq(ProductImage::getIsCover, YES));
+    }
+
+    private void updateProductCover(Long productId, String url) {
+        productMapper.update(null, Wrappers.<Product>lambdaUpdate()
+                .set(Product::getCoverImage, url)
+                .eq(Product::getId, productId));
+    }
+
+    private void removeStoredFile(String url) {
+        if (!StringUtils.hasText(url)) {
+            return;
+        }
+        try {
+            if (url.startsWith("/uploads/")) {
+                String fileName = url.substring("/uploads/".length());
+                if (fileName.isBlank() || fileName.contains("/") || fileName.contains("..")) {
+                    return;
+                }
+                Files.deleteIfExists(uploadDir.resolve(fileName));
+                return;
+            }
+            if (ossStorageService != null) {
+                ossStorageService.deleteByUrl(url);
+            }
+        } catch (IOException | RuntimeException exception) {
+            log.warn("Delete stored image failed. url={}", url, exception);
+        }
+    }
+
+    private Product getOwnedProductForUpdate(Long productId) {
+        Long userId = requireLoginUserId();
+        Product product = productMapper.selectByIdForUpdate(productId);
+        if (product == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "商品不存在");
+        }
+        if (!userId.equals(product.getSellerId())) {
+            throw new BizException(ErrorCode.FORBIDDEN, "只能操作自己发布的商品");
+        }
+        return product;
     }
 
     private Product getOwnedProduct(Long productId) {
@@ -526,14 +703,9 @@ public class ProductServiceImpl implements ProductService {
     }
 
     private String saveFile(MultipartFile file) {
-        String originalName = file.getOriginalFilename();
-        String suffix = "";
-        if (StringUtils.hasText(originalName) && originalName.contains(".")) {
-            suffix = originalName.substring(originalName.lastIndexOf('.')).toLowerCase(Locale.ROOT);
-        }
-        if (!List.of(".jpg", ".jpeg", ".png", ".webp").contains(suffix)) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "仅支持 jpg、jpeg、png、webp 图片");
-        }
+        ImageFileRules.verifySize(file);
+        String suffix = ImageFileRules.resolveSuffix(file);
+        ImageFileRules.verifyContent(file, suffix);
         if (ossStorageService != null) {
             return ossStorageService.upload(file, suffix);
         }
@@ -556,11 +728,11 @@ public class ProductServiceImpl implements ProductService {
         redisCacheService.deleteByPattern(PRODUCT_HOT_CACHE_PREFIX + "*");
     }
 
-    private String hotCacheKey(ProductQueryRequest request, int pageNo, int pageSize) {
+    private String hotCacheKey(ProductQueryRequest request, Integer status, int pageNo, int pageSize) {
         return PRODUCT_HOT_CACHE_PREFIX
                 + pageNo + ":" + pageSize
                 + ":" + value(request.getCategoryId())
-                + ":" + value(request.getStatus())
+                + ":" + value(status)
                 + ":" + value(request.getSellerId())
                 + ":" + value(request.getMinPrice())
                 + ":" + value(request.getMaxPrice())

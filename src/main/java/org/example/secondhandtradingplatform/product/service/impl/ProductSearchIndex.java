@@ -24,13 +24,16 @@ public class ProductSearchIndex {
 
     private final ElasticsearchClient client;
     private final String index;
+    private final int maxRecallRows;
     private final ProductMapper productMapper;
 
     public ProductSearchIndex(ObjectProvider<ElasticsearchClient> clientProvider,
                               @Value("${app.search.elasticsearch.index:products}") String index,
+                              @Value("${app.search.max-recall:10000}") int maxRecallRows,
                               ProductMapper productMapper) {
         this.client = clientProvider.getIfAvailable();
         this.index = index;
+        this.maxRecallRows = maxRecallRows;
         this.productMapper = productMapper;
     }
 
@@ -76,20 +79,38 @@ public class ProductSearchIndex {
         }
     }
 
-    public List<Long> search(String keyword) {
+    /**
+     * 关键词召回结果。
+     *
+     * @param ids       命中的商品 ID（按相关度排序）
+     * @param total     命中的总条数
+     * @param truncated 是否因为超过召回上限被截断——截断时不能只拿这批 ID 去做分页，否则会丢结果
+     */
+    public record SearchResult(List<Long> ids, long total, boolean truncated) {
+    }
+
+    /**
+     * 按关键词召回商品 ID。ES 不可用时返回 {@code null}，由调用方降级到数据库查询。
+     */
+    public SearchResult search(String keyword) {
         if (!isAvailable() || !StringUtils.hasText(keyword)) return null;
         try {
             Query query = Query.of(q -> q.multiMatch(m -> m.query(keyword.trim())
                     .fields("title^3", "description", "location")
                     .fuzziness("AUTO")));
             SearchResponse<Product> response = client.search(request -> request
-                            .index(index)
-                            .size(10000)
-                            .query(query), Product.class);
-            return response.hits().hits().stream()
+                    .index(index)
+                    .size(maxRecallRows)
+                    .trackTotalHits(t -> t.enabled(true))
+                    .query(query), Product.class);
+            List<Long> ids = response.hits().hits().stream()
                     .map(Hit::id)
                     .map(Long::valueOf)
                     .toList();
+            long total = response.hits().total() == null
+                    ? ids.size()
+                    : response.hits().total().value();
+            return new SearchResult(ids, total, total > ids.size());
         } catch (IOException | RuntimeException ignored) {
             return null;
         }
