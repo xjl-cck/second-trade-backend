@@ -22,6 +22,8 @@ import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnR
 import org.example.secondhandtradingplatform.order.service.TradeOrderService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
+import org.example.secondhandtradingplatform.product.message.ProductChangedEvent;
+import org.example.secondhandtradingplatform.product.message.ProductEventPublisher;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.entity.SysUser;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
@@ -63,6 +65,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
     private final OrderClosePublisher orderClosePublisher;
     private final ShippingAddressService shippingAddressService;
     private final ReturnRequestService returnRequestService;
+    private final ProductEventPublisher productEventPublisher;
 
     public TradeOrderServiceImpl(TradeOrderMapper tradeOrderMapper,
                                  ProductMapper productMapper,
@@ -71,7 +74,8 @@ public class TradeOrderServiceImpl implements TradeOrderService {
                                  OrderEventPublisher orderEventPublisher,
                                  OrderClosePublisher orderClosePublisher,
                                  ShippingAddressService shippingAddressService,
-                                 ReturnRequestService returnRequestService) {
+                                 ReturnRequestService returnRequestService,
+                                 ProductEventPublisher productEventPublisher) {
         this.tradeOrderMapper = tradeOrderMapper;
         this.productMapper = productMapper;
         this.sysUserMapper = sysUserMapper;
@@ -80,6 +84,7 @@ public class TradeOrderServiceImpl implements TradeOrderService {
         this.orderClosePublisher = orderClosePublisher;
         this.shippingAddressService = shippingAddressService;
         this.returnRequestService = returnRequestService;
+        this.productEventPublisher = productEventPublisher;
     }
 
     @Override
@@ -170,6 +175,8 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             }
             product.setStock(product.getStock() - quantity);
             productMapper.updateById(product);
+            // 库存变了，发事件让商品详情缓存失效（不再由订单服务直接摸商品缓存）
+            productEventPublisher.publish(product.getId(), ProductChangedEvent.REASON_STOCK_DEDUCTED);
             orderEventPublisher.publish(buildEvent(order, product, "订单已创建"));
             return buildResponse(order);
         } finally {
@@ -349,6 +356,8 @@ public class TradeOrderServiceImpl implements TradeOrderService {
                 canceledProduct.setStatus(PRODUCT_ON_SALE);
             }
             productMapper.updateById(canceledProduct);
+            // 取消/超时关单会回补库存，详情缓存要跟着失效
+            productEventPublisher.publish(canceledProduct.getId(), ProductChangedEvent.REASON_STOCK_RESTORED);
         }
         orderEventPublisher.publish(buildEvent(order, null, "订单已取消"));
         return true;
@@ -415,6 +424,8 @@ public class TradeOrderServiceImpl implements TradeOrderService {
             product.setStatus(PRODUCT_SOLD);
         }
         productMapper.updateById(product);
+        // 库存归零会把商品置为已售出，详情缓存同样要失效
+        productEventPublisher.publish(product.getId(), ProductChangedEvent.REASON_STATUS_CHANGED);
         orderEventPublisher.publish(buildEvent(order, product, "订单已成交"));
         return buildResponse(order);
     }

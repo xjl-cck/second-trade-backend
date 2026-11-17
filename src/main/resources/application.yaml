@@ -171,6 +171,10 @@ app:
     favorite-exchange: ${RABBITMQ_FAVORITE_EXCHANGE:favorite.events}
     favorite-queue: ${RABBITMQ_FAVORITE_QUEUE:favorite.counts}
     favorite-routing-key: ${RABBITMQ_FAVORITE_ROUTING_KEY:favorite.count}
+    # 商品变更事件：订单扣减/回补库存、商品状态变化后统一失效详情缓存
+    product-exchange: ${RABBITMQ_PRODUCT_EXCHANGE:product.events}
+    product-queue: ${RABBITMQ_PRODUCT_QUEUE:product.cache.evict}
+    product-routing-key: ${RABBITMQ_PRODUCT_ROUTING_KEY:product.changed}
     chat-exchange: ${RABBITMQ_CHAT_EXCHANGE:chat.events}
     chat-queue: ${RABBITMQ_CHAT_QUEUE:chat.notifications}
     chat-routing-key: ${RABBITMQ_CHAT_ROUTING_KEY:chat.message}

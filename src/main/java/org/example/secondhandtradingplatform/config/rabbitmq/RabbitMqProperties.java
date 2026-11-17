@@ -17,6 +17,9 @@ public class RabbitMqProperties {
     private String favoriteExchange;
     private String favoriteQueue;
     private String favoriteRoutingKey;
+    private String productExchange;
+    private String productQueue;
+    private String productRoutingKey;
     private String chatExchange;
     private String chatQueue;
     private String chatRoutingKey;

@@ -13,6 +13,7 @@ import org.example.secondhandtradingplatform.order.message.OrderEventPublisher;
 import org.example.secondhandtradingplatform.order.returnrequest.service.ReturnRequestService;
 import org.example.secondhandtradingplatform.product.entity.Product;
 import org.example.secondhandtradingplatform.product.mapper.ProductMapper;
+import org.example.secondhandtradingplatform.product.message.ProductEventPublisher;
 import org.example.secondhandtradingplatform.security.UserContext;
 import org.example.secondhandtradingplatform.user.mapper.SysUserMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -53,6 +54,7 @@ class TradeOrderServiceImplTest {
     private ReturnRequestService returnRequestService;
     private OrderEventPublisher orderEventPublisher;
     private OrderClosePublisher orderClosePublisher;
+    private ProductEventPublisher productEventPublisher;
     private TradeOrderServiceImpl tradeOrderService;
 
     @BeforeEach
@@ -65,6 +67,7 @@ class TradeOrderServiceImplTest {
         returnRequestService = mock(ReturnRequestService.class);
         orderEventPublisher = mock(OrderEventPublisher.class);
         orderClosePublisher = mock(OrderClosePublisher.class);
+        productEventPublisher = mock(ProductEventPublisher.class);
         tradeOrderService = new TradeOrderServiceImpl(
                 tradeOrderMapper,
                 productMapper,
@@ -73,7 +76,8 @@ class TradeOrderServiceImplTest {
                 orderEventPublisher,
                 orderClosePublisher,
                 shippingAddressService,
-                returnRequestService
+                returnRequestService,
+                productEventPublisher
         );
         UserContext.setUserId(BUYER_ID);
     }

@@ -71,6 +71,22 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public DirectExchange productExchange() {
+        return new DirectExchange(properties.getProductExchange(), true, false);
+    }
+
+    @Bean
+    public Queue productQueue() {
+        return durableQueueWithDeadLetter(properties.getProductQueue());
+    }
+
+    @Bean
+    public Binding productBinding(@Qualifier("productExchange") DirectExchange productExchange,
+                                  @Qualifier("productQueue") Queue productQueue) {
+        return BindingBuilder.bind(productQueue).to(productExchange).with(properties.getProductRoutingKey());
+    }
+
+    @Bean
     public DirectExchange chatExchange() {
         return new DirectExchange(properties.getChatExchange(), true, false);
     }
